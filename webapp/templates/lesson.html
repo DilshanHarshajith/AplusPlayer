@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block title %}Lesson Player - Aplus Player{% endblock %}
+
+{% block content %}
+<div class="lesson-container">
+    <div class="page-header">
+        <a href="#" onclick="goBack()" class="back-link">← Back</a>
+        <h1 id="lesson-title">Loading lesson...</h1>
+        <p id="lesson-info" class="subtitle"></p>
+    </div>
+    
+    <div id="lesson-loading" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Preparing lesson...</p>
+    </div>
+    
+    <div id="lesson-error" class="error-message hidden"></div>
+    
+    <div id="player-container" class="player-container hidden">
+        <div class="video-wrapper">
+            <video id="video-player" controls autoplay class="video-player"></video>
+        </div>
+        
+        <div class="player-controls">
+            <div id="watch-time" class="watch-time-info"></div>
+            <button id="download-btn" class="btn btn-secondary">Download Lesson</button>
+        </div>
+        
+        <div id="download-progress" class="download-progress hidden">
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div id="download-progress-fill" class="progress-fill"></div>
+                </div>
+                <div class="progress-controls">
+                    <div id="download-progress-text" class="progress-text">Starting download...</div>
+                    <button id="cancel-download-btn" class="btn btn-danger btn-sm">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script>
+const lessonId = '{{ lesson_id }}';
+let playbackUrl = null;
+
+function goBack() {
+    if (document.referrer) {
+        window.history.back();
+    } else {
+        window.location.href = '/courses';
+    }
+}
+
+async function loadLessonDetails() {
+    const loadingDiv = document.getElementById('lesson-loading');
+    const errorDiv = document.getElementById('lesson-error');
+    const lessonTitle = document.getElementById('lesson-title');
+    const lessonInfo = document.getElementById('lesson-info');
+    
+    try {
+        const response = await fetch(`/api/lesson/${lessonId}/details`);
+        const data = await response.json();
+        
+        if (response.ok) {
+            if (data.lesson) {
+                lessonTitle.textContent = data.lesson.title || 'Untitled Lesson';
+                lessonInfo.textContent = `Type: ${data.lesson.lesson_type || 'N/A'} | Can View: ${data.lesson.video_can_view ? 'Yes' : 'No'}`;
+            }
+            
+            if (data.user_watch_time !== undefined) {
+                document.getElementById('watch-time').textContent = `Watch Time: ${data.user_watch_time}`;
+            }
+            
+            loadingDiv.classList.add('hidden');
+            document.getElementById('player-container').classList.remove('hidden');
+            
+            // Auto-prepare the lesson
+            await prepareLesson();
+        } else {
+            loadingDiv.classList.add('hidden');
+            errorDiv.textContent = data.error || 'Failed to load lesson details';
+            errorDiv.classList.remove('hidden');
+        }
+    } catch (error) {
+        loadingDiv.classList.add('hidden');
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.classList.remove('hidden');
+    }
+}
+
+async function prepareLesson() {
+    const errorDiv = document.getElementById('lesson-error');
+    
+    try {
+        const response = await fetch(`/api/lesson/${lessonId}/prepare`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            playbackUrl = `/api/proxy/playback`;
+            initializePlayer();
+        } else {
+            errorDiv.textContent = data.error || 'Failed to prepare lesson';
+            errorDiv.classList.remove('hidden');
+        }
+    } catch (error) {
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.classList.remove('hidden');
+    }
+}
+
+function initializePlayer() {
+    const video = document.getElementById('video-player');
+    
+    if (Hls.isSupported()) {
+        const hls = new Hls();
+        hls.loadSource(playbackUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+            video.play();
+        });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = playbackUrl;
+        video.addEventListener('loadedmetadata', function() {
+            video.play();
+        });
+    } else {
+        document.getElementById('lesson-error').textContent = 
+            'Your browser does not support HLS playback. Please try a different browser.';
+        document.getElementById('lesson-error').classList.remove('hidden');
+    }
+}
+
+// Global variables for download intervals
+let downloadProgressInterval = null;
+let downloadSimulationInterval = null;
+let currentLessonId = null;
+
+async function downloadLesson() {
+    currentLessonId = lessonId;
+    const downloadBtn = document.getElementById('download-btn');
+    const errorDiv = document.getElementById('lesson-error');
+    const progressDiv = document.getElementById('download-progress');
+    const progressFill = document.getElementById('download-progress-fill');
+    const progressText = document.getElementById('download-progress-text');
+    
+    // Clear any existing intervals
+    if (downloadProgressInterval) clearInterval(downloadProgressInterval);
+    if (downloadSimulationInterval) clearInterval(downloadSimulationInterval);
+    
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Starting download...';
+    errorDiv.classList.add('hidden');
+    progressDiv.classList.remove('hidden');
+    if (progressFill) progressFill.style.width = '0%';
+    if (progressText) progressText.textContent = 'Starting download...';
+    
+    try {
+        // Start polling for progress first
+        downloadProgressInterval = setInterval(async () => {
+            try {
+                console.log('Checking progress for lesson:', lessonId);
+                const progressResponse = await fetch(`/api/lesson/${lessonId}/download/progress`);
+                const progressData = await progressResponse.json();
+                console.log('Progress data:', progressData);
+                
+                if (progressData.status === 'error') {
+                    clearInterval(downloadProgressInterval);
+                    if (downloadSimulationInterval) clearInterval(downloadSimulationInterval);
+                    errorDiv.textContent = progressData.message || 'Download failed';
+                    errorDiv.classList.remove('hidden');
+                    progressDiv.classList.add('hidden');
+                    downloadBtn.disabled = false;
+                    downloadBtn.textContent = 'Download Lesson';
+                    return;
+                }
+                
+                // Update progress bar
+                const progress = progressData.progress || 0;
+                console.log('Updating progress:', progress, progressData.message);
+                if (progressFill) progressFill.style.width = `${progress}%`;
+                if (progressText) progressText.textContent = progressData.message || `Downloading... ${progress}%`;
+                
+                if (progressData.status === 'completed' || progressData.status === 'sending') {
+                    clearInterval(downloadProgressInterval);
+                    if (downloadSimulationInterval) clearInterval(downloadSimulationInterval);
+                    if (progressText) progressText.textContent = 'Download complete! Saving file...';
+                }
+            } catch (e) {
+                console.error('Progress check error:', e);
+            }
+        }, 500); // Poll every 500ms for more responsive updates
+        
+        // Simulate progress while waiting for actual response
+        let simulatedProgress = 5;
+        downloadSimulationInterval = setInterval(() => {
+            if (simulatedProgress < 50) {
+                simulatedProgress += 5;
+                if (progressFill) progressFill.style.width = `${simulatedProgress}%`;
+                if (progressText) progressText.textContent = `Preparing download... ${simulatedProgress}%`;
+            } else {
+                clearInterval(downloadSimulationInterval);
+                downloadSimulationInterval = null;
+            }
+        }, 500);
+        
+        // Setup cancel button
+        const cancelBtn = document.getElementById('cancel-download-btn');
+        if (cancelBtn) {
+            cancelBtn.onclick = async () => {
+                try {
+                    const response = await fetch(`/api/lesson/${lessonId}/download/cancel`, {
+                        method: 'POST'
+                    });
+                    if (response.ok) {
+                        // Clear intervals
+                        if (downloadProgressInterval) clearInterval(downloadProgressInterval);
+                        if (downloadSimulationInterval) clearInterval(downloadSimulationInterval);
+                        
+                        // Reset UI
+                        progressDiv.classList.add('hidden');
+                        downloadBtn.disabled = false;
+                        downloadBtn.textContent = 'Download Lesson';
+                        currentLessonId = null;
+                    }
+                } catch (e) {
+                    console.error('Cancel error:', e);
+                }
+            };
+        }
+        
+        // Start the download after progress polling is set up
+        const downloadResponse = await fetch(`/api/lesson/${lessonId}/download`, {
+            method: 'POST'
+        });
+        
+        if (!downloadResponse.ok) {
+            const data = await downloadResponse.json();
+            clearInterval(downloadProgressInterval);
+            if (downloadSimulationInterval) clearInterval(downloadSimulationInterval);
+            errorDiv.textContent = data.error || 'Failed to start download';
+            errorDiv.classList.remove('hidden');
+            progressDiv.classList.add('hidden');
+            downloadBtn.disabled = false;
+            downloadBtn.textContent = 'Download Lesson';
+            return;
+        }
+        
+        // Wait for the download to complete
+        const contentType = downloadResponse.headers.get('Content-Type') || 'video/mp4';
+        const extension = contentType.includes('mp4') ? '.mp4' : '.ts';
+        
+        const blob = await downloadResponse.blob();
+        if (downloadProgressInterval) clearInterval(downloadProgressInterval);
+        if (downloadSimulationInterval) clearInterval(downloadSimulationInterval);
+        
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${lessonId}${extension}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        progressDiv.classList.add('hidden');
+        downloadBtn.textContent = 'Download Complete';
+        setTimeout(() => {
+            downloadBtn.disabled = false;
+            downloadBtn.textContent = 'Download Lesson';
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Download error:', error);
+        if (downloadProgressInterval) clearInterval(downloadProgressInterval);
+        if (downloadSimulationInterval) clearInterval(downloadSimulationInterval);
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.classList.remove('hidden');
+        progressDiv.classList.add('hidden');
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = 'Download Lesson';
+    }
+}
+
+document.getElementById('download-btn').addEventListener('click', downloadLesson);
+
+// Load lesson details when page loads
+document.addEventListener('DOMContentLoaded', loadLessonDetails);
+</script>
+{% endblock %}

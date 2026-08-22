@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Courses - Aplus Player{% endblock %}
+
+{% block content %}
+<div class="courses-container">
+    <div class="page-header">
+        <h1>My Courses</h1>
+        <p class="subtitle">Select a course to view lessons</p>
+    </div>
+    
+    <div id="courses-loading" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading courses...</p>
+    </div>
+    
+    <div id="courses-error" class="error-message hidden"></div>
+    
+    <div id="courses-grid" class="courses-grid hidden">
+        <!-- Courses will be loaded here dynamically -->
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadCourses() {
+    const loadingDiv = document.getElementById('courses-loading');
+    const errorDiv = document.getElementById('courses-error');
+    const gridDiv = document.getElementById('courses-grid');
+    
+    try {
+        const response = await fetch('/api/courses');
+        const data = await response.json();
+        
+        if (response.ok && data.courses) {
+            loadingDiv.classList.add('hidden');
+            
+            if (data.courses.length === 0) {
+                errorDiv.textContent = 'No courses found';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            // Sort courses by status (active first) then by title
+            const sortedCourses = [...data.courses].sort((a, b) => {
+                // Active courses first
+                const statusA = (a.status || '').toLowerCase();
+                const statusB = (b.status || '').toLowerCase();
+                if (statusA === 'active' && statusB !== 'active') return -1;
+                if (statusB === 'active' && statusA !== 'active') return 1;
+                // Then by title alphabetically
+                return (a.title || '').localeCompare(b.title || '');
+            });
+            
+            gridDiv.innerHTML = sortedCourses.map(course => `
+                <div class="course-card">
+                    <div class="course-info">
+                        <h3>${course.title || 'Untitled Course'}</h3>
+                        <p class="course-teacher">${course.teacher_full_name || 'Unknown Teacher'}</p>
+                        <div class="course-meta">
+                            <span class="badge">${course.subject || 'N/A'}</span>
+                            <span class="badge">${course.exm_year || 'N/A'}</span>
+                            <span class="badge status-${course.status}">${course.status || 'Active'}</span>
+                        </div>
+                    </div>
+                    <a href="/course/${course._id}" class="btn btn-secondary">View Lessons</a>
+                </div>
+            `).join('');
+            
+            gridDiv.classList.remove('hidden');
+        } else {
+            loadingDiv.classList.add('hidden');
+            errorDiv.textContent = data.error || 'Failed to load courses';
+            errorDiv.classList.remove('hidden');
+        }
+    } catch (error) {
+        loadingDiv.classList.add('hidden');
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.classList.remove('hidden');
+    }
+}
+
+// Load courses when page loads
+document.addEventListener('DOMContentLoaded', loadCourses);
+</script>
+{% endblock %}

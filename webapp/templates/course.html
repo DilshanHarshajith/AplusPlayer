@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block title %}Course Details - Aplus Player{% endblock %}
+
+{% block content %}
+<div class="course-details-container">
+    <div class="page-header">
+        <a href="{{ url_for('courses.courses_page') }}" class="back-link">← Back to Courses</a>
+        <h1 id="course-title">Loading course...</h1>
+        <p id="course-teacher" class="subtitle"></p>
+    </div>
+    
+    <div id="course-loading" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading course details...</p>
+    </div>
+    
+    <div id="course-error" class="error-message hidden"></div>
+    
+    <div id="lessons-container" class="lessons-container hidden">
+        <h2>Lessons</h2>
+        <div id="lessons-list" class="lessons-list">
+            <!-- Lessons will be loaded here dynamically -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const courseId = '{{ course_id }}';
+
+async function loadCourseDetails() {
+    const loadingDiv = document.getElementById('course-loading');
+    const errorDiv = document.getElementById('course-error');
+    const lessonsContainer = document.getElementById('lessons-container');
+    const courseTitle = document.getElementById('course-title');
+    const courseTeacher = document.getElementById('course-teacher');
+    
+    try {
+        const response = await fetch(`/api/course/${courseId}`);
+        const data = await response.json();
+        
+        if (response.ok) {
+            loadingDiv.classList.add('hidden');
+            
+            // Update course info
+            if (data.course) {
+                courseTitle.textContent = data.course.title || 'Untitled Course';
+                courseTeacher.textContent = data.course.teacher_full_name || '';
+            }
+            
+            // Load lessons
+            if (data.lessons && data.lessons.length > 0) {
+                const sortedLessons = [...data.lessons].sort((a, b) => {
+                    const yearA = a.year || 0;
+                    const yearB = b.year || 0;
+                    const monthA = a.month || 0;
+                    const monthB = b.month || 0;
+                    return yearB - yearA || monthB - monthA; // Sort newest first
+                });
+                
+                // Group lessons by month and year
+                const groupedLessons = sortedLessons.reduce((groups, lesson) => {
+                    const year = lesson.year || 'Unknown';
+                    const month = lesson.month || 'Unknown';
+                    const key = `${year}-${month}`;
+                    
+                    if (!groups[key]) {
+                        groups[key] = {
+                            year: year,
+                            month: month,
+                            lessons: []
+                        };
+                    }
+                    
+                    groups[key].lessons.push(lesson);
+                    return groups;
+                }, {});
+                
+                // Sort lessons within each group by creation date (newest first)
+                Object.keys(groupedLessons).forEach(key => {
+                    groupedLessons[key].lessons.sort((a, b) => {
+                        const dateA = new Date(a.created_at || 0);
+                        const dateB = new Date(b.created_at || 0);
+                        return dateB - dateA;
+                    });
+                });
+                
+                // Convert to array and sort by date (newest first)
+                const groupedArray = Object.values(groupedLessons).sort((a, b) => {
+                    if (a.year !== b.year) return b.year - a.year;
+                    return b.month - a.month;
+                });
+                
+                // Generate HTML for grouped lessons
+                const monthNames = {
+                    '1': 'January', '2': 'February', '3': 'March', '4': 'April', 
+                    '5': 'May', '6': 'June', '7': 'July', '8': 'August', 
+                    '9': 'September', '10': 'October', '11': 'November', '12': 'December',
+                    1: 'January', 2: 'February', 3: 'March', 4: 'April', 
+                    5: 'May', 6: 'June', 7: 'July', 8: 'August', 
+                    9: 'September', 10: 'October', 11: 'November', 12: 'December'
+                };
+                
+                let html = '';
+                groupedArray.forEach(group => {
+                    const monthName = monthNames[group.month] || group.month;
+                    html += `
+                        <div class="month-group">
+                            <h3 class="month-header">${monthName} ${group.year}</h3>
+                            <div class="month-lessons">
+                    `;
+                    
+                    group.lessons.forEach(lesson => {
+                        html += `
+                            <div class="lesson-item" id="lesson-${lesson._id}">
+                                <div class="lesson-info">
+                                    <h4>${lesson.title || 'Untitled Lesson'}</h4>
+                                    <div class="lesson-meta">
+                                        <span>${lesson.group_name || ''}</span>
+                                        ${lesson.is_free ? '<span class="badge badge-free">Free</span>' : ''}
+                                    </div>
+                                </div>
+                                <div class="lesson-actions">
+                                    <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">Watch</a>
+                                    <button onclick="downloadLesson('${lesson._id}', this)" class="btn btn-secondary btn-sm download-btn">Download</button>
+                                </div>
+                                <div class="lesson-progress hidden" id="progress-${lesson._id}">
+                                    <div class="progress-bar-small">
+                                        <div class="progress-fill-small" id="progress-fill-${lesson._id}"></div>
+                                    </div>
+                                    <div class="progress-controls-small">
+                                        <div class="progress-text-small" id="progress-text-${lesson._id}">Starting...</div>
+                                        <button onclick="cancelDownload('${lesson._id}')" class="btn btn-danger btn-xs">Cancel</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                document.getElementById('lessons-list').innerHTML = html;
+                lessonsContainer.classList.remove('hidden');
+            } else {
+                errorDiv.textContent = 'No lessons found in this course';
+                errorDiv.classList.remove('hidden');
+            }
+        } else {
+            loadingDiv.classList.add('hidden');
+            errorDiv.textContent = data.error || 'Failed to load course details';
+            errorDiv.classList.remove('hidden');
+        }
+    } catch (error) {
+        loadingDiv.classList.add('hidden');
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.classList.remove('hidden');
+    }
+}
+
+// Store download intervals for each lesson
+const lessonDownloadIntervals = {};
+const lessonSimulationIntervals = {};
+
+async function downloadLesson(lessonId, button) {
+    const originalText = button.textContent;
+    const progressDiv = document.getElementById(`progress-${lessonId}`);
+    const progressFill = document.getElementById(`progress-fill-${lessonId}`);
+    const progressText = document.getElementById(`progress-text-${lessonId}`);
+    
+    // Clear any existing intervals for this lesson
+    if (lessonDownloadIntervals[lessonId]) clearInterval(lessonDownloadIntervals[lessonId]);
+    if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
+    
+    try {
+        button.disabled = true;
+        button.textContent = 'Starting...';
+        
+        // Show progress bar
+        if (progressDiv) progressDiv.classList.remove('hidden');
+        if (progressFill) progressFill.style.width = '0%';
+        if (progressText) progressText.textContent = 'Starting...';
+        
+        // Start polling for progress first
+        lessonDownloadIntervals[lessonId] = setInterval(async () => {
+            try {
+                const progressResponse = await fetch(`/api/lesson/${lessonId}/download/progress`);
+                const progressData = await progressResponse.json();
+                
+                if (progressData.status === 'error') {
+                    clearInterval(lessonDownloadIntervals[lessonId]);
+                    if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
+                    alert('Download failed: ' + (progressData.message || 'Unknown error'));
+                    if (progressDiv) progressDiv.classList.add('hidden');
+                    button.disabled = false;
+                    button.textContent = originalText;
+                    return;
+                }
+                
+                // Update progress bar
+                const progress = progressData.progress || 0;
+                if (progressFill) progressFill.style.width = `${progress}%`;
+                if (progressText) progressText.textContent = progressData.message || `${progress}%`;
+                
+                if (progressData.status === 'completed' || progressData.status === 'sending') {
+                    clearInterval(lessonDownloadIntervals[lessonId]);
+                    if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
+                    if (progressText) progressText.textContent = 'Complete!';
+                }
+            } catch (e) {
+                console.error('Progress check error:', e);
+            }
+        }, 500);
+        
+        // Simulate progress while waiting
+        let simulatedProgress = 5;
+        lessonSimulationIntervals[lessonId] = setInterval(() => {
+            if (simulatedProgress < 50) {
+                simulatedProgress += 5;
+                if (progressFill) progressFill.style.width = `${simulatedProgress}%`;
+                if (progressText) progressText.textContent = `Preparing... ${simulatedProgress}%`;
+            } else {
+                clearInterval(lessonSimulationIntervals[lessonId]);
+                lessonSimulationIntervals[lessonId] = null;
+            }
+        }, 500);
+        
+        // Start the download
+        const response = await fetch(`/api/lesson/${lessonId}/download`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            button.textContent = 'Downloading...';
+            
+            // Get content type from response
+            const contentType = response.headers.get('Content-Type') || 'video/mp4';
+            const extension = contentType.includes('mp4') ? '.mp4' : '.ts';
+            
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${lessonId}${extension}`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            // Clear intervals
+            if (lessonDownloadIntervals[lessonId]) clearInterval(lessonDownloadIntervals[lessonId]);
+            if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
+            
+            button.textContent = 'Complete!';
+            if (progressDiv) progressDiv.classList.add('hidden');
+            
+            setTimeout(() => {
+                button.disabled = false;
+                button.textContent = originalText;
+            }, 2000);
+        } else {
+            const data = await response.json();
+            clearInterval(lessonDownloadIntervals[lessonId]);
+            if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
+            alert('Download failed: ' + (data.error || 'Unknown error'));
+            if (progressDiv) progressDiv.classList.add('hidden');
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+        if (lessonDownloadIntervals[lessonId]) clearInterval(lessonDownloadIntervals[lessonId]);
+        if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
+        alert('Network error. Please try again.');
+        if (progressDiv) progressDiv.classList.add('hidden');
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+
+async function cancelDownload(lessonId) {
+    try {
+        const response = await fetch(`/api/lesson/${lessonId}/download/cancel`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            // Clear intervals
+            if (lessonDownloadIntervals[lessonId]) clearInterval(lessonDownloadIntervals[lessonId]);
+            if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
+            
+            // Reset UI
+            const progressDiv = document.getElementById(`progress-${lessonId}`);
+            const lessonItem = document.getElementById(`lesson-${lessonId}`);
+            const button = lessonItem?.querySelector('.download-btn');
+            
+            if (progressDiv) progressDiv.classList.add('hidden');
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Download';
+            }
+        }
+    } catch (e) {
+        console.error('Cancel error:', e);
+    }
+}
+
+// Load course details when page loads
+document.addEventListener('DOMContentLoaded', loadCourseDetails);
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Error - Aplus Player{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <div class="error-box">
+        <h1>⚠️ Error</h1>
+        <p class="error-message">{{ error }}</p>
+        <a href="{{ url_for('courses.index') }}" class="btn btn-primary">Go Home</a>
+    </div>
+</div>
+{% endblock %}
