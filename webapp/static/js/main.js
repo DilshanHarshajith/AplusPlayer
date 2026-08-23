@@ -19,6 +19,33 @@ async function logout() {
     }
 }
 
+// Watched-lesson tracking (stored client-side; the vendor API has no
+// concept of a "watched" flag, so this is purely a local UI preference)
+const WATCHED_KEY = 'aplus_watched_lessons';
+
+// Returns { [lessonId]: true, ... }
+function getWatchedLessons() {
+    try {
+        return JSON.parse(localStorage.getItem(WATCHED_KEY) || '{}');
+    } catch (error) {
+        return {};
+    }
+}
+
+function isLessonWatched(lessonId) {
+    return !!getWatchedLessons()[lessonId];
+}
+
+function setLessonWatched(lessonId, watched) {
+    const watchedLessons = getWatchedLessons();
+    if (watched) {
+        watchedLessons[lessonId] = true;
+    } else {
+        delete watchedLessons[lessonId];
+    }
+    localStorage.setItem(WATCHED_KEY, JSON.stringify(watchedLessons));
+}
+
 // Utility function to show error messages
 function showError(message) {
     const errorDiv = document.getElementById('error-message') || document.getElementById('lesson-error');
@@ -117,5 +144,7 @@ window.AplusPlayer = {
     hideLoading,
     formatDate,
     debounce,
-    checkAuth
+    checkAuth,
+    isLessonWatched,
+    setLessonWatched
 };

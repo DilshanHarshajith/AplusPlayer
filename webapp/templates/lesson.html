@@ -24,6 +24,10 @@
         
         <div class="player-controls">
             <div id="watch-time" class="watch-time-info"></div>
+            <label class="watched-toggle-player">
+                <input type="checkbox" id="watched-checkbox" onchange="onWatchedToggle(this.checked)">
+                Mark as watched
+            </label>
             <div class="speed-control">
                 <label for="speed-slider">Speed: <span id="speed-value">1.0x</span></label>
                 <input type="range" id="speed-slider" min="0.5" max="4" step="0.05" value="1">
@@ -57,6 +61,17 @@ function goBack() {
         window.history.back();
     } else {
         window.location.href = '/courses';
+    }
+}
+
+function onWatchedToggle(checked) {
+    AplusPlayer.setLessonWatched(lessonId, checked);
+}
+
+function initWatchedCheckbox() {
+    const checkbox = document.getElementById('watched-checkbox');
+    if (checkbox) {
+        checkbox.checked = AplusPlayer.isLessonWatched(lessonId);
     }
 }
 
@@ -315,6 +330,9 @@ async function downloadLesson() {
 document.getElementById('download-btn').addEventListener('click', downloadLesson);
 
 // Load lesson details when page loads
-document.addEventListener('DOMContentLoaded', loadLessonDetails);
+document.addEventListener('DOMContentLoaded', () => {
+    initWatchedCheckbox();
+    loadLessonDetails();
+});
 </script>
 {% endblock %}

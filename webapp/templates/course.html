@@ -113,8 +113,14 @@ async function loadCourseDetails() {
                     `;
                     
                     group.lessons.forEach(lesson => {
+                        const watched = AplusPlayer.isLessonWatched(lesson._id);
                         html += `
-                            <div class="lesson-item" id="lesson-${lesson._id}">
+                            <div class="lesson-item ${watched ? 'watched' : ''}" id="lesson-${lesson._id}">
+                                <label class="watched-toggle" title="Mark as watched">
+                                    <input type="checkbox" class="watched-checkbox"
+                                           ${watched ? 'checked' : ''}
+                                           onchange="toggleWatched('${lesson._id}', this.checked)">
+                                </label>
                                 <div class="lesson-info">
                                     <h4>${lesson.title || 'Untitled Lesson'}</h4>
                                     <div class="lesson-meta">
@@ -160,6 +166,14 @@ async function loadCourseDetails() {
         loadingDiv.classList.add('hidden');
         errorDiv.textContent = 'Network error. Please try again.';
         errorDiv.classList.remove('hidden');
+    }
+}
+
+function toggleWatched(lessonId, checked) {
+    AplusPlayer.setLessonWatched(lessonId, checked);
+    const lessonItem = document.getElementById(`lesson-${lessonId}`);
+    if (lessonItem) {
+        lessonItem.classList.toggle('watched', checked);
     }
 }
 
