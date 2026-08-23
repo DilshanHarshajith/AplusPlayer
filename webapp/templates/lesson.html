@@ -24,6 +24,10 @@
         
         <div class="player-controls">
             <div id="watch-time" class="watch-time-info"></div>
+            <div class="speed-control">
+                <label for="speed-slider">Speed: <span id="speed-value">1.0x</span></label>
+                <input type="range" id="speed-slider" min="0.5" max="4" step="0.05" value="1">
+            </div>
             <button id="download-btn" class="btn btn-secondary">Download Lesson</button>
         </div>
         
@@ -115,6 +119,24 @@ async function prepareLesson() {
     }
 }
 
+function setupSpeedControl() {
+    const video = document.getElementById('video-player');
+    const slider = document.getElementById('speed-slider');
+    const label = document.getElementById('speed-value');
+
+    slider.addEventListener('input', () => {
+        const rate = parseFloat(slider.value);
+        video.playbackRate = rate;
+        label.textContent = `${rate.toFixed(2)}x`;
+    });
+
+    // Keep the label/slider correct if playbackRate is ever changed elsewhere
+    video.addEventListener('ratechange', () => {
+        label.textContent = `${video.playbackRate.toFixed(2)}x`;
+        slider.value = video.playbackRate;
+    });
+}
+
 function initializePlayer() {
     const video = document.getElementById('video-player');
     
@@ -135,6 +157,8 @@ function initializePlayer() {
             'Your browser does not support HLS playback. Please try a different browser.';
         document.getElementById('lesson-error').classList.remove('hidden');
     }
+
+    setupSpeedControl();
 }
 
 // Global variables for download intervals

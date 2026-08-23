@@ -413,6 +413,65 @@ body {
     color: #888;
 }
 
+/* Playback Speed Control */
+.speed-control {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.speed-control label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #888;
+    margin-bottom: 0;
+}
+
+.speed-control #speed-value {
+    color: #7ab;
+    font-weight: 600;
+    min-width: 3.2em;
+    display: inline-block;
+}
+
+.speed-control input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 140px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.15);
+    outline: none;
+    cursor: pointer;
+}
+
+.speed-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #7ab;
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+
+.speed-control input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.speed-control input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: none;
+    border-radius: 50%;
+    background: #7ab;
+    cursor: pointer;
+}
+
 /* Download Progress */
 .download-progress {
     margin-top: 1rem;
@@ -633,5 +692,15 @@ body {
     .player-controls {
         flex-direction: column;
         gap: 1rem;
+    }
+
+    .speed-control {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .speed-control input[type="range"] {
+        flex: 1;
+        margin-left: 1rem;
     }
 }
