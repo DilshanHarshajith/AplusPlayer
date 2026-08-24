@@ -46,6 +46,48 @@ function setLessonWatched(lessonId, watched) {
     localStorage.setItem(WATCHED_KEY, JSON.stringify(watchedLessons));
 }
 
+// Last-watched-position tracking (stored client-side, same pattern as the
+// watched-lesson tracking above) — lets the player resume where you left off
+const POSITION_KEY = 'aplus_video_positions';
+
+// Don't bother saving/resuming right at the very start or very end of a video
+const POSITION_MIN_SECONDS = 5;
+const POSITION_END_BUFFER_SECONDS = 15;
+
+// Returns { [lessonId]: seconds, ... }
+function getVideoPositions() {
+    try {
+        return JSON.parse(localStorage.getItem(POSITION_KEY) || '{}');
+    } catch (error) {
+        return {};
+    }
+}
+
+function getVideoPosition(lessonId) {
+    const positions = getVideoPositions();
+    return positions[lessonId] || 0;
+}
+
+// `duration` (optional) avoids saving a position right at the tail end of
+// the video, so a finished lesson starts over next time instead of resuming
+// with only a few seconds left.
+function setVideoPosition(lessonId, seconds, duration) {
+    const positions = getVideoPositions();
+    const nearEnd = duration && seconds >= duration - POSITION_END_BUFFER_SECONDS;
+    if (seconds > POSITION_MIN_SECONDS && !nearEnd) {
+        positions[lessonId] = seconds;
+    } else {
+        delete positions[lessonId];
+    }
+    localStorage.setItem(POSITION_KEY, JSON.stringify(positions));
+}
+
+function clearVideoPosition(lessonId) {
+    const positions = getVideoPositions();
+    delete positions[lessonId];
+    localStorage.setItem(POSITION_KEY, JSON.stringify(positions));
+}
+
 // Utility function to show error messages
 function showError(message) {
     const errorDiv = document.getElementById('error-message') || document.getElementById('lesson-error');
@@ -146,5 +188,8 @@ window.AplusPlayer = {
     debounce,
     checkAuth,
     isLessonWatched,
-    setLessonWatched
+    setLessonWatched,
+    getVideoPosition,
+    setVideoPosition,
+    clearVideoPosition
 };

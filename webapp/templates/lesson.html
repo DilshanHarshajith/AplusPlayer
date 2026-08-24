@@ -152,6 +152,64 @@ function setupSpeedControl() {
     });
 }
 
+// How often (ms) to persist the current playback position while playing
+const POSITION_SAVE_INTERVAL_MS = 5000;
+let positionSaveTimer = null;
+
+function formatTime(seconds) {
+    seconds = Math.max(0, Math.floor(seconds || 0));
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function setupResumePlayback() {
+    const video = document.getElementById('video-player');
+    const resumeSeconds = AplusPlayer.getVideoPosition(lessonId);
+
+    if (resumeSeconds > 0) {
+        // Seek once metadata is available (needed before currentTime can be set)
+        const seekToSaved = () => {
+            video.currentTime = resumeSeconds;
+            const errorDiv = document.getElementById('lesson-error');
+            errorDiv.textContent = `Resuming from ${formatTime(resumeSeconds)}`;
+            errorDiv.classList.remove('hidden');
+            // This is an informational notice, not a real error — clear it
+            // shortly so it doesn't sit there looking like a problem.
+            setTimeout(() => errorDiv.classList.add('hidden'), 4000);
+        };
+        if (video.readyState >= 1) {
+            seekToSaved();
+        } else {
+            video.addEventListener('loadedmetadata', seekToSaved, { once: true });
+        }
+    }
+
+    // Persist position periodically while playing, not on every timeupdate
+    if (positionSaveTimer) clearInterval(positionSaveTimer);
+    positionSaveTimer = setInterval(() => {
+        if (!video.paused && !video.seeking && video.currentTime > 0) {
+            AplusPlayer.setVideoPosition(lessonId, video.currentTime, video.duration);
+        }
+    }, POSITION_SAVE_INTERVAL_MS);
+
+    // Also save on pause and when navigating away, so a quick pause-and-close
+    // isn't lost waiting for the next interval tick
+    video.addEventListener('pause', () => {
+        AplusPlayer.setVideoPosition(lessonId, video.currentTime, video.duration);
+    });
+    window.addEventListener('beforeunload', () => {
+        AplusPlayer.setVideoPosition(lessonId, video.currentTime, video.duration);
+    });
+
+    // Once the lesson is finished, clear the saved position so it starts
+    // from the beginning next time instead of resuming at the very end
+    video.addEventListener('ended', () => {
+        if (positionSaveTimer) clearInterval(positionSaveTimer);
+        AplusPlayer.clearVideoPosition(lessonId);
+    });
+}
+
 function initializePlayer() {
     const video = document.getElementById('video-player');
     
@@ -174,6 +232,7 @@ function initializePlayer() {
     }
 
     setupSpeedControl();
+    setupResumePlayback();
 }
 
 // Global variables for download intervals
