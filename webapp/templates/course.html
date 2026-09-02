@@ -18,7 +18,21 @@
     <div id="course-error" class="error-message hidden"></div>
     
     <div id="lessons-container" class="lessons-container hidden">
-        <h2>Lessons</h2>
+        <div class="filters-container">
+            <div class="filter-side filter-side-right">
+                <div class="filter-row filter-row-dates">
+                    <select id="year-select" class="filter-select" onchange="setYear(this.value)">
+                        <!-- Year options injected by JS -->
+                    </select>
+                    <select id="month-select" class="filter-select" onchange="setMonth(this.value)">
+                        <!-- Month options injected by JS -->
+                    </select>
+                </div>
+                <div class="filter-row" id="group-filters">
+                    <!-- Group chips injected by JS -->
+                </div>
+            </div>
+        </div>
         <div id="lessons-list" class="lessons-list">
             <!-- Lessons will be loaded here dynamically -->
         </div>
@@ -29,6 +43,244 @@
 {% block scripts %}
 <script>
 const courseId = '{{ course_id }}';
+
+
+
+let allLessons = [];
+let activeYear = 'All';
+let activeMonth = 'All';
+let activeGroup = 'All';
+
+const monthNamesShort = {
+    '1': 'Jan', '2': 'Feb', '3': 'Mar', '4': 'Apr', '5': 'May', '6': 'Jun',
+    '7': 'Jul', '8': 'Aug', '9': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec',
+    'Unknown': 'Unknown'
+};
+
+const monthNamesFull = {
+    '1': 'January', '2': 'February', '3': 'March', '4': 'April', '5': 'May', '6': 'June',
+    '7': 'July', '8': 'August', '9': 'September', '10': 'October', '11': 'November', '12': 'December',
+    'Unknown': 'Unknown'
+};
+
+function getSafeString(val, fallback) {
+    if (val === null || val === undefined) return fallback;
+    const str = String(val).trim();
+    return str !== '' ? str : fallback;
+}
+
+function initFilters(lessons) {
+    allLessons = lessons.map(l => {
+        // Normalize fields heavily to avoid any edge cases
+        return {
+            ...l,
+            _safeYear: getSafeString(l.year, 'Unknown'),
+            _safeMonth: getSafeString(l.month, 'Unknown'),
+            _safeGroup: getSafeString(l.group_name, 'UnGrouped')
+        };
+    });
+    
+    // Default sort by created_at descending
+    allLessons.sort((a, b) => {
+        const dateA = new Date(a.created_at || 0);
+        const dateB = new Date(b.created_at || 0);
+        return dateB - dateA;
+    });
+
+    renderFilters();
+    renderFilteredLessons();
+}
+
+function renderFilters() {
+    const years = new Set(allLessons.map(l => l._safeYear));
+    const sortedYears = Array.from(years).sort((a, b) => {
+        if (a === 'Unknown') return 1;
+        if (b === 'Unknown') return -1;
+        return Number(b) - Number(a); // descending
+    });
+
+    // Months available under the currently selected year (so the dropdown can
+    // show every month but disable ones with no lessons in that year).
+    const availableMonthsForYear = new Set(
+        allLessons.filter(l => activeYear === 'All' || l._safeYear === activeYear)
+                 .map(l => l._safeMonth)
+    );
+
+    // Groups are narrowed by both year and month so the user only sees
+    // groups that actually have lessons matching the current scope.
+    const groups = new Set(
+        allLessons.filter(l => {
+            const matchYear = activeYear === 'All' || l._safeYear === activeYear;
+            const matchMonth = activeMonth === 'All'
+                || (activeMonth === 'Unknown' ? l._safeMonth === 'Unknown'
+                    : parseInt(l._safeMonth, 10) === parseInt(activeMonth, 10));
+            return matchYear && matchMonth;
+        }).map(l => l._safeGroup)
+    );
+    const sortedGroups = Array.from(groups).sort();
+
+    // --- Render Year <select> ---
+    const yearSelect = document.getElementById('year-select');
+    if (yearSelect) {
+        let yearHTML = `<option value="All" ${activeYear === 'All' ? 'selected' : ''}>All years</option>`;
+        sortedYears.forEach(y => {
+            yearHTML += `<option value="${y}" ${activeYear === y ? 'selected' : ''}>${y}</option>`;
+        });
+        yearSelect.innerHTML = yearHTML;
+    }
+
+    // --- Render Month <select> ---
+    const monthSelect = document.getElementById('month-select');
+    if (monthSelect) {
+        let monthHTML = `<option value="All" ${activeMonth === 'All' ? 'selected' : ''}>All months</option>`;
+        ['1','2','3','4','5','6','7','8','9','10','11','12'].forEach(m => {
+            // Match either '8' or '08' (API may send either form).
+            const hasContent = Array.from(availableMonthsForYear).some(av => parseInt(av, 10) === parseInt(m, 10));
+            const marker = hasContent ? ' ★' : '';
+            monthHTML += `<option value="${m}" ${activeMonth === m ? 'selected' : ''}>${monthNamesFull[m]}${marker}</option>`;
+        });
+        if (availableMonthsForYear.has('Unknown')) {
+            monthHTML += `<option value="Unknown" ${activeMonth === 'Unknown' ? 'selected' : ''}>Unknown ★</option>`;
+        }
+        monthSelect.innerHTML = monthHTML;
+    }
+
+    // --- Render Groups as chips on the right ---
+    const groupContainer = document.getElementById('group-filters');
+    if (groupContainer) {
+        let groupHTML = `<button class="filter-chip ${activeGroup === 'All' ? 'active' : ''}" onclick="setGroup('All')">All</button>`;
+        sortedGroups.forEach(g => {
+            const safeG = String(g).replace(/'/g, "\\'");
+            groupHTML += `<button class="filter-chip ${activeGroup === g ? 'active' : ''}" onclick="setGroup('${safeG}')">${g}</button>`;
+        });
+        groupContainer.innerHTML = groupHTML;
+    }
+}
+
+window.setYear = function(y) {
+    activeYear = y;
+    activeMonth = 'All'; // reset month when year changes
+    activeGroup = 'All'; // reset group; new year may not contain it
+    renderFilters();
+    renderFilteredLessons();
+};
+
+window.setMonth = function(m) {
+    activeMonth = m;
+    // If the currently active group has no lessons in the new month, fall
+    // back to 'All' so the lessons list isn't empty for an invisible chip.
+    if (activeGroup !== 'All') {
+        const groupStillExists = allLessons.some(l => {
+            const matchYear = activeYear === 'All' || l._safeYear === activeYear;
+            const matchMonth = activeMonth === 'All'
+                || (activeMonth === 'Unknown' ? l._safeMonth === 'Unknown'
+                    : parseInt(l._safeMonth, 10) === parseInt(activeMonth, 10));
+            return matchYear && matchMonth && l._safeGroup === activeGroup;
+        });
+        if (!groupStillExists) activeGroup = 'All';
+    }
+    renderFilters();
+    renderFilteredLessons();
+};
+
+window.setGroup = function(g) {
+    activeGroup = g;
+    renderFilters();
+    renderFilteredLessons();
+};
+
+function renderFilteredLessons() {
+    const list = document.getElementById('lessons-list');
+    
+    let filtered = allLessons.filter(l => {
+        let matchYear = (activeYear === 'All' || l._safeYear === activeYear);
+        
+        let matchMonth = false;
+        if (activeMonth === 'All') {
+            matchMonth = true;
+        } else if (activeMonth === 'Unknown') {
+            matchMonth = l._safeMonth === 'Unknown';
+        } else {
+            matchMonth = parseInt(l._safeMonth, 10) === parseInt(activeMonth, 10);
+        }
+        
+        let matchGroup = (activeGroup === 'All' || l._safeGroup === activeGroup);
+        
+        return matchYear && matchMonth && matchGroup;
+    });
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<p style="color: #888;">No lessons match the selected filters.</p>';
+        return;
+    }
+
+    const groupedLessons = filtered.reduce((groups, lesson) => {
+        const year = lesson._safeYear;
+        const month = lesson._safeMonth;
+        const key = `${year}-${month}`;
+        if (!groups[key]) groups[key] = { year, month, lessons: [] };
+        groups[key].lessons.push(lesson);
+        return groups;
+    }, {});
+
+    const groupedArray = Object.values(groupedLessons).sort((a, b) => {
+        if (a.year !== b.year) return Number(b.year || 0) - Number(a.year || 0);
+        return Number(b.month || 0) - Number(a.month || 0);
+    });
+    
+    let html = '';
+    groupedArray.forEach(group => {
+        // monthName might come from normalized integer lookup
+        const mKey = group.month !== 'Unknown' ? parseInt(group.month, 10).toString() : 'Unknown';
+        const monthName = monthNamesFull[mKey] || group.month;
+        html += `
+            <div class="month-group">
+                <h3 class="month-header">${monthName} ${group.year}</h3>
+                <div class="month-lessons">
+        `;
+        
+        group.lessons.forEach(lesson => {
+            const watched = AplusPlayer.isLessonWatched(lesson._id);
+            const lGroup = lesson._safeGroup;
+            html += `
+                <div class="lesson-item ${watched ? 'watched' : ''}" id="lesson-${lesson._id}">
+                    <label class="watched-toggle" title="Mark as watched">
+                        <input type="checkbox" class="watched-checkbox"
+                               ${watched ? 'checked' : ''}
+                               onchange="toggleWatched('${lesson._id}', this.checked)">
+                    </label>
+                    <div class="lesson-info">
+                        <h4>${lesson.title || 'Untitled Lesson'}</h4>
+                        <div class="lesson-meta">
+                            <span class="badge badge-group">${lGroup}</span>
+                            ${lesson.is_free ? '<span class="badge badge-free">Free</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="lesson-actions">
+                        <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">Watch</a>
+                        <button onclick="downloadLesson('${lesson._id}', this)" class="btn btn-secondary btn-sm download-btn">Download</button>
+                    </div>
+                    <div class="lesson-progress hidden" id="progress-${lesson._id}">
+                        <div class="progress-bar-small">
+                            <div class="progress-fill-small" id="progress-fill-${lesson._id}"></div>
+                        </div>
+                        <div class="progress-controls-small">
+                            <div class="progress-text-small" id="progress-text-${lesson._id}">Starting...</div>
+                            <button onclick="cancelDownload('${lesson._id}')" class="btn btn-danger btn-xs">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    list.innerHTML = html;
+}
 
 async function loadCourseDetails() {
     const loadingDiv = document.getElementById('course-loading');
@@ -50,108 +302,9 @@ async function loadCourseDetails() {
                 courseTeacher.textContent = data.course.teacher_full_name || '';
             }
             
-            // Load lessons
+            // Load and filter lessons
             if (data.lessons && data.lessons.length > 0) {
-                const sortedLessons = [...data.lessons].sort((a, b) => {
-                    const yearA = a.year || 0;
-                    const yearB = b.year || 0;
-                    const monthA = a.month || 0;
-                    const monthB = b.month || 0;
-                    return yearB - yearA || monthB - monthA; // Sort newest first
-                });
-                
-                // Group lessons by month and year
-                const groupedLessons = sortedLessons.reduce((groups, lesson) => {
-                    const year = lesson.year || 'Unknown';
-                    const month = lesson.month || 'Unknown';
-                    const key = `${year}-${month}`;
-                    
-                    if (!groups[key]) {
-                        groups[key] = {
-                            year: year,
-                            month: month,
-                            lessons: []
-                        };
-                    }
-                    
-                    groups[key].lessons.push(lesson);
-                    return groups;
-                }, {});
-                
-                // Sort lessons within each group by creation date (newest first)
-                Object.keys(groupedLessons).forEach(key => {
-                    groupedLessons[key].lessons.sort((a, b) => {
-                        const dateA = new Date(a.created_at || 0);
-                        const dateB = new Date(b.created_at || 0);
-                        return dateB - dateA;
-                    });
-                });
-                
-                // Convert to array and sort by date (newest first)
-                const groupedArray = Object.values(groupedLessons).sort((a, b) => {
-                    if (a.year !== b.year) return b.year - a.year;
-                    return b.month - a.month;
-                });
-                
-                // Generate HTML for grouped lessons
-                const monthNames = {
-                    '1': 'January', '2': 'February', '3': 'March', '4': 'April', 
-                    '5': 'May', '6': 'June', '7': 'July', '8': 'August', 
-                    '9': 'September', '10': 'October', '11': 'November', '12': 'December',
-                    1: 'January', 2: 'February', 3: 'March', 4: 'April', 
-                    5: 'May', 6: 'June', 7: 'July', 8: 'August', 
-                    9: 'September', 10: 'October', 11: 'November', 12: 'December'
-                };
-                
-                let html = '';
-                groupedArray.forEach(group => {
-                    const monthName = monthNames[group.month] || group.month;
-                    html += `
-                        <div class="month-group">
-                            <h3 class="month-header">${monthName} ${group.year}</h3>
-                            <div class="month-lessons">
-                    `;
-                    
-                    group.lessons.forEach(lesson => {
-                        const watched = AplusPlayer.isLessonWatched(lesson._id);
-                        html += `
-                            <div class="lesson-item ${watched ? 'watched' : ''}" id="lesson-${lesson._id}">
-                                <label class="watched-toggle" title="Mark as watched">
-                                    <input type="checkbox" class="watched-checkbox"
-                                           ${watched ? 'checked' : ''}
-                                           onchange="toggleWatched('${lesson._id}', this.checked)">
-                                </label>
-                                <div class="lesson-info">
-                                    <h4>${lesson.title || 'Untitled Lesson'}</h4>
-                                    <div class="lesson-meta">
-                                        <span>${lesson.group_name || ''}</span>
-                                        ${lesson.is_free ? '<span class="badge badge-free">Free</span>' : ''}
-                                    </div>
-                                </div>
-                                <div class="lesson-actions">
-                                    <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">Watch</a>
-                                    <button onclick="downloadLesson('${lesson._id}', this)" class="btn btn-secondary btn-sm download-btn">Download</button>
-                                </div>
-                                <div class="lesson-progress hidden" id="progress-${lesson._id}">
-                                    <div class="progress-bar-small">
-                                        <div class="progress-fill-small" id="progress-fill-${lesson._id}"></div>
-                                    </div>
-                                    <div class="progress-controls-small">
-                                        <div class="progress-text-small" id="progress-text-${lesson._id}">Starting...</div>
-                                        <button onclick="cancelDownload('${lesson._id}')" class="btn btn-danger btn-xs">Cancel</button>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    });
-                    
-                    html += `
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                document.getElementById('lessons-list').innerHTML = html;
+                initFilters(data.lessons);
                 lessonsContainer.classList.remove('hidden');
             } else {
                 errorDiv.textContent = 'No lessons found in this course';

@@ -26,7 +26,7 @@ body {
 }
 
 .nav-container {
-    max-width: 1200px;
+    max-width: 1600px;
     margin: 0 auto;
     display: flex;
     justify-content: space-between;
@@ -58,7 +58,7 @@ body {
 /* Main Content */
 .main-content {
     flex: 1;
-    max-width: 1200px;
+    max-width: 1600px;
     width: 100%;
     margin: 0 auto;
     padding: 2rem;
@@ -679,6 +679,101 @@ body {
     margin-bottom: 2rem;
 }
 
+.filters-container {
+    margin-bottom: 2rem;
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    align-items: flex-start;
+}
+
+.filter-side {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 160px;
+}
+
+.filter-side-right {
+    flex: 1 1 auto;
+    min-width: 240px;
+    align-items: flex-end;
+}
+
+.filter-row-dates {
+    justify-content: flex-end;
+}
+
+.filter-select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #eee;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    min-width: 140px;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: #2b1d9c;
+}
+
+.filter-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.filter-chip {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ccc;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.filter-chip:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.filter-chip.active {
+    background: #2b1d9c;
+    border-color: #2b1d9c;
+    color: #fff;
+}
+
+.filter-chip:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.filter-chip .has-content-icon {
+    color: #4ade80;
+    font-size: 0.8rem;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .nav-container {
@@ -747,4 +842,23 @@ body {
         flex: 1;
         margin-left: 1rem;
     }
+
+    .filters-container {
+        flex-direction: column;
+    }
+
+    .filter-side {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .filter-select {
+        width: 100%;
+    }
+}
+
+.badge-group {
+    background: rgba(43, 29, 156, 0.2);
+    color: #a395f5;
+    border: 1px solid rgba(43, 29, 156, 0.4);
 }
