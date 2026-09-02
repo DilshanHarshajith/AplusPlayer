@@ -54,12 +54,12 @@ player/                 lesson processing + site/API interaction — no Flask
 
 webapp/                 everything HTTP-facing — pages, JSON API, streaming
 ├── __init__.py           Flask application factory; registers all blueprints
-├── auth.py                login page + login/logout API
+├── auth.py                login page + login/logout + auth-status API
 ├── courses.py              home redirect, course listing, course details
 ├── lessons.py               lesson page, lesson details, playback prepare
 ├── downloads.py              streams a download, using player/download_engine.py
 ├── proxy.py                   HLS proxy routes, using player/streaming.py
-├── store.py                    shared in-memory session + download-progress state
+├── store.py                    shared SQLite KV store (user-scoped, worker-safe)
 ├── decorators.py                login_required_page / login_required_api guards
 ├── errors.py                     404/500 error handlers
 ├── static/
@@ -117,6 +117,73 @@ After logging in you're taken straight to your courses page, where you can:
 - Download lessons as `.mp4`/`.ts` (via `webapp/downloads.py`), with a live
   progress bar and cancel support
 
+## Running as a multi-user web service
+
+The app is built to be shared: **every user logs in with their own Aplus
+account**, and their sessions, playback state, and download progress are
+isolated per user and shared safely across gunicorn workers via a SQLite
+store (`webapp/store.py`, default file `aplus_state.db`).
+
+### Quick start — Docker (recommended)
+
+```bash
+# 1. Set a strong session-signing key
+export FLASK_SECRET_KEY="$(openssl rand -hex 32)"
+
+# 2. Build and run (SQLite state persists in the aplus_state volume)
+docker compose up --build -d
+# → http://<host>:5000
+```
+
+See `docker-compose.yml` and `.env.example` for the supported environment
+variables (`FLASK_SECRET_KEY`, `APLUS_STATE_DB`, optional `GUNICORN_*` and
+`APLUS_PREFILL`).
+
+### Bare server — gunicorn + systemd
+
+```bash
+pip install -r requirements.txt
+export FLASK_SECRET_KEY="$(openssl rand -hex 32)"
+gunicorn -c gunicorn.conf.py wsgi:app
+```
+
+A minimal `systemd` unit:
+
+```ini
+[Unit]
+Description=Aplus Player web service
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/aplus-player
+Environment=FLASK_SECRET_KEY=change-me
+ExecStart=/opt/aplus-player/.venv/bin/gunicorn -c gunicorn.conf.py wsgi:app
+Restart=always
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Put an nginx/Caddy reverse proxy in front for TLS and to shield the app from
+the public network. The app binds `0.0.0.0:5000` by default (`GUNICORN_BIND`).
+
+### Multi-user notes
+
+- **Login is per-account.** The form is blank unless the operator sets
+  `APLUS_PREFILL=1` (which pre-fills a single server account — convenient for
+  personal use, not for a shared service).
+- **State is user-scoped.** The store keys everything by
+  `<namespace>:<user>:<lesson>`, so two users watching the *same* lesson never
+  clobber each other's session or download progress.
+- **State is worker-safe & durable.** SQLite in WAL mode with a busy timeout is
+  shared by every gunicorn worker, and the DB file persists across restarts
+  (mount it on a volume in Docker).
+- **Workers + threads.** `gunicorn.conf.py` runs a few worker processes with
+  threaded workers so long-running downloads and the HLS proxy don't serialize
+  behind one another.
+
 ## Security notes
 
 - Video decryption keys are never exposed to the browser directly — only
@@ -124,4 +191,4 @@ After logging in you're taken straight to your courses page, where you can:
 - Sessions are stored server-side via Flask's session mechanism; set
   `FLASK_SECRET_KEY` in your environment for anything beyond local/dev use.
 - `.env` contains plaintext credentials — keep it out of version control and
-  `chmod 600` it.
+  `chmod 600` it. `.dockerignore` keeps `.env` and `*.db` out of the image.
