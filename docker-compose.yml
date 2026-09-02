@@ -28,7 +28,4 @@ services:
       # APLUS_MOBILE: ""
       # APLUS_PASSWORD: ""
     volumes:
-      - aplus_state:/data
-
-volumes:
-  aplus_state:
+      - ./data:/data
