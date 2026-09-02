@@ -32,6 +32,7 @@ def api_lesson_details(lesson_id):
 @login_required_api
 def api_lesson_prepare(lesson_id):
     """Resolve + verify the lesson's video key, ready the proxy can use."""
+    user = session.get("mobile", "anonymous")
     try:
         api = AplusAPI(token=session["token"])
         sess = PlaybackSession(api, lesson_id)
@@ -48,9 +49,10 @@ def api_lesson_prepare(lesson_id):
         "video_aes_key": sess.video_aes_key.hex() if sess.video_aes_key else None,
         "segments_encrypted": sess.segments_encrypted,
     }
-    # ...while the real PlaybackSession object (with its live HTTP session)
-    # lives server-side, where the proxy blueprint can reach it.
-    store.put_session(lesson_id, sess, api)
+    # ...while the resolved key data (no live HTTP objects) lives in the
+    # shared store, scoped per user so concurrent users never collide and
+    # any gunicorn worker can serve the proxy/download paths for it.
+    store.put_session(user, lesson_id, sess.to_data().to_dict())
 
     return jsonify({
         "success": True,

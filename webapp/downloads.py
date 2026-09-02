@@ -24,35 +24,44 @@ from .decorators import login_required_api
 bp = Blueprint("downloads", __name__)
 
 
-def _resolve_session(lesson_id, api):
-    """Reuse an already-prepared session for this lesson if one exists,
+def _resolve_session(user, lesson_id, api):
+    """Reuse an already-prepared snapshot for this user+lesson if one exists,
     otherwise prepare a fresh one (e.g. downloading straight from the
-    course list without having opened the lesson player first)."""
-    entry = store.get_session(lesson_id)
+    course list without having opened the lesson player first).
+
+    Returns a PlaybackSessionData, which carries everything the download
+    engine needs (base URL, bearer token, AES key, playlist hash) without
+    any live AplusAPI object — safe to rebuild in whichever worker serves
+    this request.
+    """
+    from player.session import PlaybackSessionData
+
+    entry = store.get_session(user, lesson_id)
     if entry is not None:
-        return entry["session"]
+        return PlaybackSessionData.from_dict(entry)
     sess = PlaybackSession(api, lesson_id)
     sess.prepare()
-    store.put_session(lesson_id, sess, api)
-    return sess
+    store.put_session(user, lesson_id, sess.to_data().to_dict())
+    return sess.to_data()
 
 
 @bp.route("/api/lesson/<lesson_id>/download", methods=["POST"])
 @login_required_api
 def api_lesson_download(lesson_id):
     """Stream a decrypted, optionally remuxed video file to the client."""
-    store.init_progress(lesson_id)
+    user = session.get("mobile", "anonymous")
+    store.init_progress(user, lesson_id)
 
     try:
         api = AplusAPI(token=session["token"])
-        sess = _resolve_session(lesson_id, api)
-        seg_paths, iv = sess.list_variant_segments()
+        data = _resolve_session(user, lesson_id, api)
+        seg_paths, iv = data.list_variant_segments()
     except Exception as exc:  # noqa: BLE001
-        store.update_progress(lesson_id, status="error", message=str(exc))
+        store.update_progress(user, lesson_id, status="error", message=str(exc))
         return jsonify({"error": str(exc)}), 500
 
     total = len(seg_paths)
-    store.update_progress(lesson_id, status="downloading", progress=5,
+    store.update_progress(user, lesson_id, status="downloading", progress=5,
                           total=total, message="Downloading segments...")
 
     temp_dir = tempfile.gettempdir()
@@ -73,9 +82,9 @@ def api_lesson_download(lesson_id):
     def generate():
         try:
             final_file = download_and_remux(
-                sess, seg_paths, iv, temp_ts, temp_mp4,
-                is_cancelled=lambda: store.is_cancelled(lesson_id),
-                on_progress=lambda **fields: store.update_progress(lesson_id, **fields))
+                data, seg_paths, iv, temp_ts, temp_mp4,
+                is_cancelled=lambda: store.is_cancelled(user, lesson_id),
+                on_progress=lambda **fields: store.update_progress(user, lesson_id, **fields))
 
             if final_file is None:
                 # Cancelled mid-download. Stop quietly rather than raising:
@@ -85,13 +94,13 @@ def api_lesson_download(lesson_id):
                 # spam the server log with a traceback for what is normal,
                 # user-requested behavior. Returning just closes the
                 # (now-truncated, discarded) download stream.
-                store.update_progress(lesson_id, status="cancelled",
+                store.update_progress(user, lesson_id, status="cancelled",
                                       message="Download cancelled")
                 cleanup()
-                store.clear_progress(lesson_id)
+                store.clear_progress(user, lesson_id)
                 return
 
-            store.update_progress(lesson_id, status="sending", progress=99,
+            store.update_progress(user, lesson_id, status="sending", progress=99,
                                   message="Transferring file...")
 
             with open(final_file, "rb") as fh:
@@ -101,15 +110,15 @@ def api_lesson_download(lesson_id):
                         break
                     yield chunk
 
-            store.update_progress(lesson_id, status="completed", progress=100,
+            store.update_progress(user, lesson_id, status="completed", progress=100,
                                   message="Download completed")
             cleanup()
             # give the client's final poll a moment to see "completed"
             # before the entry disappears
             time.sleep(5)
-            store.clear_progress(lesson_id)
+            store.clear_progress(user, lesson_id)
         except Exception as exc:  # noqa: BLE001
-            store.update_progress(lesson_id, status="error",
+            store.update_progress(user, lesson_id, status="error",
                                   message=f"Download failed: {exc}")
             cleanup()
             raise
@@ -128,7 +137,8 @@ def api_lesson_download(lesson_id):
 @login_required_api
 def api_download_progress(lesson_id):
     """Poll the current progress of a lesson's in-flight download."""
-    progress = store.get_progress(lesson_id)
+    user = session.get("mobile", "anonymous")
+    progress = store.get_progress(user, lesson_id)
     if progress is None:
         return jsonify({"status": "not_started", "progress": 0,
                         "message": "Download not started"})
@@ -139,9 +149,10 @@ def api_download_progress(lesson_id):
 @login_required_api
 def api_download_cancel(lesson_id):
     """Flag an in-flight download for cancellation."""
-    if store.get_progress(lesson_id) is None:
+    user = session.get("mobile", "anonymous")
+    if store.get_progress(user, lesson_id) is None:
         return jsonify({"error": "No active download to cancel"}), 404
-    store.set_cancelled(lesson_id)
-    store.update_progress(lesson_id, status="cancelled",
+    store.set_cancelled(user, lesson_id)
+    store.update_progress(user, lesson_id, status="cancelled",
                           message="Download cancelled")
     return jsonify({"success": True, "message": "Download cancelled"})

@@ -12,6 +12,7 @@ import requests
 from flask import Blueprint, Response, jsonify, request, session
 
 from player import config
+from player.session import PlaybackSessionData
 from player.streaming import decrypt_if_playlist, rewrite_manifest
 
 from . import store
@@ -23,12 +24,18 @@ _upstream.headers["User-Agent"] = config.UA
 
 
 def _current_playback_session():
-    """Return the PlaybackSession for this browser session's lesson, if any."""
+    """Return the PlaybackSessionData for this browser session's lesson.
+
+    Built from the user-scoped snapshot in the shared store (not a live
+    object), so the proxy works identically no matter which gunicorn worker
+    serves the request.
+    """
     lesson_session = session.get("lesson_session")
     if not lesson_session:
         return None
-    entry = store.get_session(lesson_session.get("lesson_id"))
-    return entry["session"] if entry else None
+    user = session.get("mobile", "anonymous")
+    entry = store.get_session(user, lesson_session.get("lesson_id"))
+    return PlaybackSessionData.from_dict(entry) if entry else None
 
 
 def _origin():
