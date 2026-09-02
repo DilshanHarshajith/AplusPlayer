@@ -7,7 +7,6 @@
     <div class="page-header">
         <a href="#" onclick="goBack()" class="back-link">← Back</a>
         <h1 id="lesson-title">Loading lesson...</h1>
-        <p id="lesson-info" class="subtitle"></p>
     </div>
     
     <div id="lesson-loading" class="loading-spinner">
@@ -79,8 +78,7 @@ async function loadLessonDetails() {
     const loadingDiv = document.getElementById('lesson-loading');
     const errorDiv = document.getElementById('lesson-error');
     const lessonTitle = document.getElementById('lesson-title');
-    const lessonInfo = document.getElementById('lesson-info');
-    
+
     try {
         const response = await fetch(`/api/lesson/${lessonId}/details`);
         const data = await response.json();
@@ -88,13 +86,12 @@ async function loadLessonDetails() {
         if (response.ok) {
             if (data.lesson) {
                 lessonTitle.textContent = data.lesson.title || 'Untitled Lesson';
-                lessonInfo.textContent = `Type: ${data.lesson.lesson_type || 'N/A'} | Can View: ${data.lesson.video_can_view ? 'Yes' : 'No'}`;
             }
-            
+
             if (data.user_watch_time !== undefined) {
                 document.getElementById('watch-time').textContent = `Watch Time: ${data.user_watch_time}`;
             }
-            
+
             loadingDiv.classList.add('hidden');
             document.getElementById('player-container').classList.remove('hidden');
             
