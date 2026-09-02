@@ -1,4 +1,6 @@
 """Login page and login/logout API endpoints."""
+import os
+
 from flask import Blueprint, jsonify, render_template, request, session
 
 from player.api import AplusAPI
@@ -8,8 +10,15 @@ bp = Blueprint("auth", __name__)
 
 @bp.route("/login")
 def login_page():
-    """Render the login page."""
-    return render_template("login.html")
+    """Render the login page.
+
+    Credentials from the .env file (APLUS_MOBILE / APLUS_PASSWORD, loaded by
+    create_app) are passed in so the form can be pre-filled. Whatever the
+    user actually submits always takes precedence.
+    """
+    return render_template("login.html",
+                           env_mobile=os.environ.get("APLUS_MOBILE", ""),
+                           env_password=os.environ.get("APLUS_PASSWORD", ""))
 
 
 @bp.route("/api/login", methods=["POST"])
