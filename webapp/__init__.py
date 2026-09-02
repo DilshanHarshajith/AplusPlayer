@@ -16,6 +16,7 @@ imports Flask.
   errors.py      404/500 handlers
 """
 import os
+import sys
 
 from flask import Flask
 
@@ -51,6 +52,10 @@ def create_app():
     app = Flask(__name__)
     app.secret_key = os.environ.get("FLASK_SECRET_KEY",
                                     "dev-secret-key-change-in-production")
+    if app.secret_key == "dev-secret-key-change-in-production":
+        print("[!] WARNING: FLASK_SECRET_KEY is unset — using an insecure "
+              "dev default. Set a strong random value in production so "
+              "sessions survive worker restarts.", file=sys.stderr)
 
     app.template_folder = os.path.join(base_dir, "templates")
     app.static_folder = os.path.join(base_dir, "static")

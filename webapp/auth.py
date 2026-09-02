@@ -12,13 +12,15 @@ bp = Blueprint("auth", __name__)
 def login_page():
     """Render the login page.
 
-    Credentials from the .env file (APLUS_MOBILE / APLUS_PASSWORD, loaded by
-    create_app) are passed in so the form can be pre-filled. Whatever the
-    user actually submits always takes precedence.
+    Each user logs in with their own Aplus account, so the form is blank by
+    default. If the operator wants the server's own credentials pre-filled
+    (single-account convenience), they can set APLUS_PREFILL=1 — whatever
+    the user actually submits always takes precedence.
     """
+    prefill = os.environ.get("APLUS_PREFILL", "").lower() in ("1", "true", "yes")
     return render_template("login.html",
-                           env_mobile=os.environ.get("APLUS_MOBILE", ""),
-                           env_password=os.environ.get("APLUS_PASSWORD", ""))
+                           env_mobile=os.environ.get("APLUS_MOBILE", "") if prefill else "",
+                           env_password=os.environ.get("APLUS_PASSWORD", "") if prefill else "")
 
 
 @bp.route("/api/login", methods=["POST"])
@@ -47,3 +49,16 @@ def api_logout():
     """Clear the Flask session."""
     session.clear()
     return jsonify({"success": True})
+
+
+@bp.route("/api/user")
+def api_user():
+    """Return the current auth status.
+
+    The frontend's checkAuth() polls this to decide whether to bounce the
+    user to the login page: 401 when not logged in, 200 with the account
+    details when they are.
+    """
+    if "token" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    return jsonify({"authenticated": True, "mobile": session.get("mobile", "")})
