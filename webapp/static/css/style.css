@@ -349,9 +349,9 @@ body {
 }
 
 .month-lessons {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.25rem;
 }
 
 .lesson-item {
@@ -360,26 +360,45 @@ body {
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
+    flex-direction: column;
     justify-content: space-between;
+    min-height: 160px;
+}
+
+.lesson-info h4 {
+    margin-bottom: 0.5rem;
+    color: #eee;
+    font-size: 1.05rem;
+    line-height: 1.4;
+}
+
+.lesson-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    color: #888;
+    font-size: 0.85rem;
+}
+
+.lesson-card-bottom {
+    display: flex;
     align-items: center;
+    gap: 0.5rem;
+    margin-top: auto;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lesson-card-bottom .watched-toggle {
+    flex-shrink: 0;
 }
 
 .lesson-actions {
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
-}
-
-.lesson-info h4 {
-    margin-bottom: 0.5rem;
-    color: #eee;
-}
-
-.lesson-meta {
-    display: flex;
-    gap: 1rem;
-    color: #888;
-    font-size: 0.9rem;
+    margin-left: auto;
 }
 
 /* Watched checkbox — course list */
@@ -797,19 +816,22 @@ body {
         grid-template-columns: 1fr;
     }
     
-    .lesson-item {
-        flex-direction: column;
-        gap: 1rem;
-        text-align: center;
+    .month-lessons {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     }
-    
+
+    .lesson-item {
+        min-height: 140px;
+    }
+
     .lesson-actions {
         flex-direction: column;
         width: 100%;
     }
-    
+
     .lesson-actions .btn {
         width: 100%;
+        text-align: center;
     }
     
     .month-group {

@@ -244,21 +244,22 @@ function renderFilteredLessons() {
             const lGroup = lesson._safeGroup;
             html += `
                 <div class="lesson-item ${watched ? 'watched' : ''}" id="lesson-${lesson._id}">
-                    <label class="watched-toggle" title="Mark as watched">
-                        <input type="checkbox" class="watched-checkbox"
-                               ${watched ? 'checked' : ''}
-                               onchange="toggleWatched('${lesson._id}', this.checked)">
-                    </label>
                     <div class="lesson-info">
                         <h4>${lesson.title || 'Untitled Lesson'}</h4>
                         <div class="lesson-meta">
-                            <span class="badge badge-group">${lGroup}</span>
                             ${lesson.is_free ? '<span class="badge badge-free">Free</span>' : ''}
                         </div>
                     </div>
-                    <div class="lesson-actions">
-                        <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">Watch</a>
-                        <button onclick="downloadLesson('${lesson._id}', this)" class="btn btn-secondary btn-sm download-btn">Download</button>
+                    <div class="lesson-card-bottom">
+                        <label class="watched-toggle" title="Mark as watched">
+                            <input type="checkbox" class="watched-checkbox"
+                                   ${watched ? 'checked' : ''}
+                                   onchange="toggleWatched('${lesson._id}', this.checked)">
+                        </label>
+                        <div class="lesson-actions">
+                            <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">Watch</a>
+                            <button onclick="downloadLesson('${lesson._id}', this)" class="btn btn-secondary btn-sm download-btn">Download</button>
+                        </div>
                     </div>
                     <div class="lesson-progress hidden" id="progress-${lesson._id}">
                         <div class="progress-bar-small">
