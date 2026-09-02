@@ -1,78 +1,173 @@
 """
-Shared in-memory state for the web UI.
+Shared cross-worker state for the web UI.
 
-The original app.py kept `active_sessions`, `download_progress`, and
-`download_cancel` as closures inside `create_app()`, which made them
-invisible to anything outside that one function. Pulling them out here
-lets every blueprint (lessons, downloads, proxy) share the same state
-without importing app.py itself.
+Multi-user / multi-worker notes
+-------------------------------
+The original store kept three process-local dicts keyed by lesson_id alone.
+That broke two ways for a shared web service: (1) two users watching the
+*same* lesson clobbered each other's session and download progress, and
+(2) the state lived only in one process, so gunicorn's multiple workers
+couldn't see it and every restart wiped it.
 
-This is process-local, in-memory storage — fine for a single dev server
-process, but it won't survive a restart and won't work across multiple
-worker processes. If this ever needs to run behind gunicorn with more
-than one worker, swap this module's dict-backed storage for something
-external (Redis, etc.) without touching the blueprints that call it.
+This module replaces those dicts with a key-value store that is:
+
+  * **user-scoped** — every key is namespaced by ``<namespace>:<user>:<lesson>``,
+    so different users never collide, even on the same lesson.
+  * **worker-safe** — backed by a single SQLite file in WAL mode with a busy
+    timeout, so every gunicorn worker (and the browser's progress polls) reads
+    and writes the same state.
+  * **durable** — the DB file survives restarts and can be mounted on a
+    persistent volume (see docker-compose).
+
+Namespaces::
+
+    session:<user>:<lesson>    -> JSON: serializable playback-session snapshot
+    progress:<user>:<lesson>   -> JSON: download progress dict
+    cancel:<user>:<lesson>     -> "1"/"0": download-cancel flag
+
+The callers (lessons, downloads, proxy blueprints) pass the logged-in user
+(``session["mobile"]``) explicitly; this module never touches Flask.
 """
-import threading
+import json
+import os
+import sqlite3
+import time
 
-# lesson_id -> {"session": PlaybackSession, "api": AplusAPI}
-active_sessions = {}
+_DEFAULT_DB = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "aplus_state.db",
+)
+# Overridable via env so Docker can point it at a mounted volume.
+STORE_PATH = os.environ.get("APLUS_STATE_DB", _DEFAULT_DB)
 
-# lesson_id -> {"status", "progress", "total", "message"}
-download_progress = {}
-
-# lesson_id -> bool
-download_cancel = {}
-
-_lock = threading.Lock()
-
-
-def put_session(lesson_id, sess, api):
-    """Register a prepared PlaybackSession for later proxy/download use."""
-    with _lock:
-        active_sessions[lesson_id] = {"session": sess, "api": api}
-
-
-def get_session(lesson_id):
-    """Return the {"session", "api"} entry for a lesson, or None."""
-    with _lock:
-        return active_sessions.get(lesson_id)
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS kv (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+"""
 
 
-def init_progress(lesson_id):
-    """Reset progress tracking for a new download."""
-    download_progress[lesson_id] = {
+def _connect():
+    """Open a SQLite connection with multi-worker-friendly pragmas."""
+    directory = os.path.dirname(STORE_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    conn = sqlite3.connect(STORE_PATH, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
+    return conn
+
+
+def _init_schema():
+    conn = _connect()
+    try:
+        conn.execute(_SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _set(key: str, value: str):
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES(?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "  value=excluded.value, updated_at=excluded.updated_at",
+            (key, value, time.time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _get(key: str):
+    conn = _connect()
+    try:
+        cur = conn.execute("SELECT value FROM kv WHERE key = ?", (key,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def _delete(key: str):
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM kv WHERE key = ?", (key,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _key(namespace: str, user: str, lesson_id: str) -> str:
+    """Build a user-scoped storage key (never just the lesson id)."""
+    return f"{namespace}:{user}:{lesson_id}"
+
+
+# ---------------------------------------------------------------------------
+# Playback-session snapshots
+# ---------------------------------------------------------------------------
+
+def put_session(user, lesson_id, data: dict):
+    """Store a serializable playback-session snapshot (a to_dict() payload)."""
+    _set(_key("session", user, lesson_id), json.dumps(data))
+
+
+def get_session(user, lesson_id):
+    """Return the stored session snapshot (dict) for a user+lesson, or None."""
+    raw = _get(_key("session", user, lesson_id))
+    return json.loads(raw) if raw else None
+
+
+# ---------------------------------------------------------------------------
+# Download progress + cancellation
+# ---------------------------------------------------------------------------
+
+def init_progress(user, lesson_id):
+    """Reset progress tracking for a new download by this user."""
+    _set(_key("progress", user, lesson_id), json.dumps({
         "status": "preparing",
         "progress": 0,
         "total": 0,
         "message": "Preparing lesson...",
-    }
-    download_cancel[lesson_id] = False
+    }))
+    _set(_key("cancel", user, lesson_id), "0")
 
 
-def update_progress(lesson_id, **fields):
+def update_progress(user, lesson_id, **fields):
     """Merge fields into a lesson's progress dict, if it exists."""
-    entry = download_progress.get(lesson_id)
-    if entry is not None:
-        entry.update(fields)
+    raw = _get(_key("progress", user, lesson_id))
+    if raw is None:
+        return
+    entry = json.loads(raw)
+    entry.update(fields)
+    _set(_key("progress", user, lesson_id), json.dumps(entry))
 
 
-def get_progress(lesson_id):
-    """Return the progress dict for a lesson, or None if not tracked."""
-    return download_progress.get(lesson_id)
+def get_progress(user, lesson_id):
+    """Return the progress dict for a user+lesson, or None if not tracked."""
+    raw = _get(_key("progress", user, lesson_id))
+    return json.loads(raw) if raw else None
 
 
-def clear_progress(lesson_id):
-    """Drop progress tracking for a lesson once it's no longer needed."""
-    download_progress.pop(lesson_id, None)
-    download_cancel.pop(lesson_id, None)
+def clear_progress(user, lesson_id):
+    """Drop progress + cancel tracking once a download is done."""
+    _delete(_key("progress", user, lesson_id))
+    _delete(_key("cancel", user, lesson_id))
 
 
-def is_cancelled(lesson_id):
-    """Whether a cancel request has been flagged for this lesson."""
-    return download_cancel.get(lesson_id, False)
+def is_cancelled(user, lesson_id) -> bool:
+    """Whether a cancel request has been flagged for this user+lesson."""
+    return _get(_key("cancel", user, lesson_id)) == "1"
 
 
-def set_cancelled(lesson_id):
-    """Flag a lesson's in-progress download for cancellation."""
-    download_cancel[lesson_id] = True
+def set_cancelled(user, lesson_id):
+    """Flag a user's in-progress download for cancellation."""
+    _set(_key("cancel", user, lesson_id), "1")
+
+
+# Ensure the schema exists the first time this module is imported.
+_init_schema()

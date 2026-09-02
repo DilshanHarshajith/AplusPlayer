@@ -20,6 +20,123 @@ _upstream = requests.Session()
 _upstream.headers["User-Agent"] = config.UA
 
 
+class PlaybackSessionData:
+    """A serializable, worker-safe snapshot of a prepared PlaybackSession.
+
+    Holds everything the HLS proxy and download paths need to talk to the
+    CDN (base URL, per-lesson Bearer token, decrypted AES key, playlist
+    hash) without the live AplusAPI / requests objects. It can be stored in
+    the shared store (SQLite) and reconstructed in any gunicorn worker, so
+    a lesson prepared in one worker can be served by another — that is what
+    lets the app run behind multiple workers serving many users at once.
+
+    All attributes are plain JSON-able values; the AES key is kept as bytes
+    in memory but hex-encoded when serialized via to_dict/from_dict.
+    """
+
+    __slots__ = ("lesson_id", "base_url", "video_access_token",
+                 "playback_hash", "video_aes_key", "segments_encrypted",
+                 "stream_url")
+
+    def __init__(self, lesson_id="", base_url="", video_access_token="",
+                 playback_hash="", video_aes_key=b"", segments_encrypted=True,
+                 stream_url=""):
+        self.lesson_id = lesson_id
+        self.base_url = base_url
+        self.video_access_token = video_access_token
+        self.playback_hash = playback_hash
+        self.video_aes_key = video_aes_key
+        self.segments_encrypted = segments_encrypted
+        self.stream_url = stream_url
+
+    @classmethod
+    def from_session(cls, sess):
+        """Snapshot a live, already-prepared PlaybackSession."""
+        return cls(
+            lesson_id=sess.lesson_id,
+            base_url=sess.base_url,
+            video_access_token=sess.video_access_token,
+            playback_hash=sess.playback_hash,
+            video_aes_key=sess.video_aes_key,
+            segments_encrypted=sess.segments_encrypted,
+            stream_url=sess.stream_url,
+        )
+
+    def to_dict(self) -> dict:
+        """Return a JSON-safe dict for storage in the shared store."""
+        return {
+            "lesson_id": self.lesson_id,
+            "base_url": self.base_url,
+            "video_access_token": self.video_access_token,
+            "playback_hash": self.playback_hash,
+            "video_aes_key": self.video_aes_key.hex() if self.video_aes_key else None,
+            "segments_encrypted": self.segments_encrypted,
+            "stream_url": self.stream_url,
+        }
+
+    @classmethod
+    def from_dict(cls, d) -> "PlaybackSessionData":
+        """Rebuild a PlaybackSessionData from a to_dict() payload."""
+        key = d.get("video_aes_key")
+        return cls(
+            lesson_id=d.get("lesson_id", ""),
+            base_url=d.get("base_url", ""),
+            video_access_token=d.get("video_access_token", ""),
+            playback_hash=d.get("playback_hash", ""),
+            video_aes_key=bytes.fromhex(key) if key else b"",
+            segments_encrypted=d.get("segments_encrypted", True),
+            stream_url=d.get("stream_url", ""),
+        )
+
+    def fetch_upstream(self, path: str) -> bytes:
+        """Fetch an authenticated resource relative to base_url."""
+        r = _upstream.get(
+            self.base_url + path,
+            headers={"Authorization": f"Bearer {self.video_access_token}"},
+            timeout=120)
+        if r.status_code != 200:
+            raise RuntimeError(f"upstream {r.status_code} for {path}")
+        return r.content
+
+    def _fetch_and_decrypt_playlist(self, path: str) -> str:
+        """Fetch a playlist and return its plaintext #EXTM3U text."""
+        raw = self.fetch_upstream(path)
+        body = raw.decode("utf-8", errors="replace").strip()
+        if re.fullmatch(r"[0-9a-fA-F]+", body) and len(body) % 2 == 0:
+            return decrypt_hex_payload(body, self.playback_hash, config.KEY_RES) or ""
+        if body.startswith("#EXTM3U"):
+            return body
+        return ""
+
+    def list_variant_segments(self) -> tuple[list[str], bytes]:
+        """Return every segment path (relative to base_url) plus the CBC IV.
+
+        Mirrors the playlist parsing PlaybackSession._probe_video_key uses to
+        validate just the first segment, but returns the full ordered list —
+        used by the download module to pull an entire lesson.
+        """
+        master_text = self._fetch_and_decrypt_playlist("/playback")
+        variants = [l.strip() for l in master_text.splitlines()
+                    if l.strip() and not l.startswith("#")]
+        if not variants:
+            raise RuntimeError("master playlist has no variants")
+
+        variant_text = self._fetch_and_decrypt_playlist("/" + variants[0])
+        seg_names = [l.strip() for l in variant_text.splitlines()
+                     if l.strip() and not l.startswith("#")]
+        if not seg_names:
+            raise RuntimeError("variant playlist has no segments")
+
+        iv_m = re.search(r"IV=0[xX]([0-9a-fA-F]+)", variant_text)
+        iv = bytes.fromhex(iv_m.group(1)[-32:].rjust(32, "0")) if iv_m \
+            else bytes(16)
+
+        var_dir = variants[0].rsplit("/", 1)[0] if "/" in variants[0] else ""
+        seg_paths = [f"/{var_dir}/{name}" if var_dir else f"/{name}"
+                     for name in seg_names]
+        return seg_paths, iv
+
+
 class PlaybackSession:
     """Resolve and verify the stream details for one lesson."""
 
@@ -61,6 +178,15 @@ class PlaybackSession:
 
         # Probe: verify against a real segment; also detects unencrypted media.
         self.video_aes_key = self._probe_video_key(vk)
+
+    def to_data(self) -> PlaybackSessionData:
+        """Return a serializable snapshot for the shared store.
+
+        The proxy and download paths work from this snapshot rather than the
+        live object, so a lesson prepared in one gunicorn worker can be served
+        by any other (and by any number of concurrent users).
+        """
+        return PlaybackSessionData.from_session(self)
 
     def fetch_upstream(self, path: str) -> bytes:
         """Fetch an authenticated resource relative to base_url — segments,
