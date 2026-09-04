@@ -21,33 +21,9 @@ import sys
 from flask import Flask
 
 
-def _load_dotenv(path):
-    """Load KEY=VALUE pairs from a .env file into os.environ.
-
-    Real environment variables always win over the file: a key already set
-    in `os.environ` is left untouched, so secrets in the shell aren't
-    clobbered by a stale .env. Lines are `KEY=VALUE`; blank lines, `#`
-    comments, and malformed lines are skipped, and surrounding quotes on
-    the value are stripped.
-    """
-    if not os.path.isfile(path):
-        return
-    with open(path, encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip("'\"").strip()
-            if key and key not in os.environ:
-                os.environ[key] = value
-
-
 def create_app():
     """Create and configure the Flask application."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    _load_dotenv(os.path.join(base_dir, "..", ".env"))
 
     app = Flask(__name__)
     app.secret_key = os.environ.get("FLASK_SECRET_KEY",

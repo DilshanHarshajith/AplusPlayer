@@ -1,6 +1,4 @@
 """Login page and login/logout API endpoints."""
-import os
-
 from flask import Blueprint, jsonify, render_template, request, session
 
 from player.api import AplusAPI
@@ -12,15 +10,9 @@ bp = Blueprint("auth", __name__)
 def login_page():
     """Render the login page.
 
-    Each user logs in with their own Aplus account, so the form is blank by
-    default. If the operator wants the server's own credentials pre-filled
-    (single-account convenience), they can set APLUS_PREFILL=1 — whatever
-    the user actually submits always takes precedence.
+    Each user logs in with their own Aplus account.
     """
-    prefill = os.environ.get("APLUS_PREFILL", "").lower() in ("1", "true", "yes")
-    return render_template("login.html",
-                           env_mobile=os.environ.get("APLUS_MOBILE", "") if prefill else "",
-                           env_password=os.environ.get("APLUS_PASSWORD", "") if prefill else "")
+    return render_template("login.html")
 
 
 @bp.route("/api/login", methods=["POST"])

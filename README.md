@@ -41,7 +41,6 @@ either:
 ```
 AplusPlayer.py      entrypoint — python3 AplusPlayer.py [--host] [--port] [--debug]
 requirements.txt
-.env                    saved credentials (chmod 600 recommended)
 
 player/                 lesson processing + site/API interaction — no Flask
 ├── __init__.py
@@ -96,13 +95,8 @@ CDN-fetching/decrypting/remuxing work to `player/download_engine.py` and
 Keep `AplusPlayer.py`, the `webapp/` package, and the `player/` package
 together in the same directory.
 
-Credentials can be supplied via `.env`:
-```
-APLUS_MOBILE=07XXXXXXXXX
-APLUS_PASSWORD=yourpassword
-```
-or entered directly on the web login page — the login form always takes
-precedence.
+Credentials are entered directly on the web login page — every user logs in
+with their own Aplus account.
 
 ## Usage
 
@@ -136,8 +130,7 @@ docker compose up --build -d
 ```
 
 See `docker-compose.yml` and `.env.example` for the supported environment
-variables (`FLASK_SECRET_KEY`, `APLUS_STATE_DB`, optional `GUNICORN_*` and
-`APLUS_PREFILL`).
+variables (`FLASK_SECRET_KEY`, `APLUS_STATE_DB`, optional `GUNICORN_*`).
 
 ### Bare server — gunicorn + systemd
 
@@ -171,9 +164,8 @@ the public network. The app binds `0.0.0.0:5000` by default (`GUNICORN_BIND`).
 
 ### Multi-user notes
 
-- **Login is per-account.** The form is blank unless the operator sets
-  `APLUS_PREFILL=1` (which pre-fills a single server account — convenient for
-  personal use, not for a shared service).
+- **Login is per-account.** The form is always blank — every user enters
+  their own credentials.
 - **State is user-scoped.** The store keys everything by
   `<namespace>:<user>:<lesson>`, so two users watching the *same* lesson never
   clobber each other's session or download progress.
@@ -190,5 +182,3 @@ the public network. The app binds `0.0.0.0:5000` by default (`GUNICORN_BIND`).
   through the authenticated `/api/proxy/*` routes.
 - Sessions are stored server-side via Flask's session mechanism; set
   `FLASK_SECRET_KEY` in your environment for anything beyond local/dev use.
-- `.env` contains plaintext credentials — keep it out of version control and
-  `chmod 600` it. `.dockerignore` keeps `.env` and `*.db` out of the image.

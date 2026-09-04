@@ -22,10 +22,5 @@ services:
       # GUNICORN_WORKERS: "2"
       # GUNICORN_THREADS: "8"
       # GUNICORN_TIMEOUT: "600"
-      # Optional: pre-fill the login form with a server account (off by
-      # default so every user logs in with their own credentials).
-      # APLUS_PREFILL: "0"
-      # APLUS_MOBILE: ""
-      # APLUS_PASSWORD: ""
     volumes:
       - ./data:/data

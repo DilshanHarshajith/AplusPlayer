@@ -7,27 +7,22 @@
     <div class="login-box">
         <h1>Login to Aplus Player</h1>
         <p class="subtitle">Enter your Aplus Education credentials</p>
-        
+
         <form id="login-form" class="login-form">
             <div class="form-group">
                 <label for="mobile">Mobile Number</label>
-                <input type="tel" id="mobile" name="mobile" placeholder="07XXXXXXXXX"
-                       value="{{ env_mobile }}" required>
+                <input type="tel" id="mobile" name="mobile" placeholder="07XXXXXXXXX" required>
                 <small>Enter your registered mobile number</small>
             </div>
 
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" placeholder="Your password"
-                       value="{{ env_password }}" required>
-                <small class="env-hint {% if not env_mobile and not env_password %}hidden{% endif %}">
-                    Pre-filled from .env — edit if needed
-                </small>
+                <input type="password" id="password" name="password" placeholder="Your password" required>
             </div>
 
             <button type="submit" class="btn btn-primary">Login</button>
         </form>
-        
+
         <div id="login-error" class="error-message hidden"></div>
     </div>
 </div>
@@ -37,11 +32,11 @@
 <script>
 document.getElementById('login-form').addEventListener('submit', async function(e) {
     e.preventDefault();
-    
+
     const mobile = document.getElementById('mobile').value;
     const password = document.getElementById('password').value;
     const errorDiv = document.getElementById('login-error');
-    
+
     try {
         const response = await fetch('/api/login', {
             method: 'POST',
@@ -50,9 +45,9 @@ document.getElementById('login-form').addEventListener('submit', async function(
             },
             body: JSON.stringify({ mobile, password })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok && data.success) {
             window.location.href = '/courses';
         } else {
