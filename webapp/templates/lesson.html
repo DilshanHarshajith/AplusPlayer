@@ -221,6 +221,66 @@ function setupSpeedControl() {
     });
 }
 
+function setupKeyboardControls() {
+    const video = document.getElementById('video-player');
+    if (!video) return;
+
+    // Match the slider's granularity so keyboard and slider stay in lockstep
+    const SPEED_STEP = 0.05;
+    const SPEED_MIN = 0.5;
+    const SPEED_MAX = 4;
+    // Round to the slider's 2-decimal precision to avoid drift (e.g. 1.0500000000000003)
+    const quantize = (rate) => Math.round(rate * 100) / 100;
+
+    document.addEventListener('keydown', (e) => {
+        // Don't hijack typing in form controls or contenteditable surfaces
+        const target = e.target;
+        const tag = (target && target.tagName ? target.tagName : '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || (target && target.isContentEditable)) {
+            return;
+        }
+        // Ignore modified key combos (Cmd/Ctrl/Alt + key) so we don't break
+        // browser shortcuts like Cmd+F (find) or Ctrl+Arrow (jump word).
+        if (e.metaKey || e.ctrlKey || e.altKey) {
+            return;
+        }
+
+        switch (e.key) {
+            case ' ':
+            case 'Spacebar': // legacy
+                e.preventDefault();
+                if (video.paused) {
+                    video.play().catch(() => { /* autoplay rejection: ignore */ });
+                } else {
+                    video.pause();
+                }
+                break;
+            case 'f':
+            case 'F':
+                e.preventDefault();
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                } else if (video.requestFullscreen) {
+                    video.requestFullscreen().catch(() => {});
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                } else if (video.msRequestFullscreen) {
+                    video.msRequestFullscreen();
+                }
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                video.playbackRate = quantize(Math.min(SPEED_MAX, video.playbackRate + SPEED_STEP));
+                // The 'ratechange' listener in setupSpeedControl syncs slider + label
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                video.playbackRate = quantize(Math.max(SPEED_MIN, video.playbackRate - SPEED_STEP));
+                break;
+        }
+    });
+}
+
 // How often (ms) to persist the current playback position while playing
 const POSITION_SAVE_INTERVAL_MS = 5000;
 let positionSaveTimer = null;
@@ -309,6 +369,7 @@ function initializePlayer() {
 
     setupSpeedControl();
     setupResumePlayback();
+    setupKeyboardControls();
 }
 
 function setupQualityMonitoring(hls) {
