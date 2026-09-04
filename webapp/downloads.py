@@ -12,7 +12,7 @@ import shutil
 import tempfile
 import time
 
-from flask import Blueprint, Response, jsonify, session
+from flask import Blueprint, Response, jsonify, request, session
 
 from player.api import AplusAPI
 from player.download_engine import download_and_remux
@@ -53,9 +53,13 @@ def api_lesson_download(lesson_id):
     store.init_progress(user, lesson_id)
 
     try:
+        # Get quality parameter from request
+        request_data = request.get_json() or {}
+        quality = request_data.get("quality", "auto")
+        
         api = AplusAPI(token=session["token"])
         data = _resolve_session(user, lesson_id, api)
-        seg_paths, iv = data.list_variant_segments()
+        seg_paths, iv = data.list_variant_segments(quality=quality)
     except Exception as exc:  # noqa: BLE001
         store.update_progress(user, lesson_id, status="error", message=str(exc))
         return jsonify({"error": str(exc)}), 500

@@ -72,3 +72,21 @@ def api_playback_url(lesson_id):
     host = request.host.split(":")[0]
     port = request.host.split(":")[1] if ":" in request.host else "5000"
     return jsonify({"playback_url": f"http://{host}:{port}/api/proxy/playback"})
+
+
+@bp.route("/api/lesson/<lesson_id>/qualities")
+@login_required_api
+def api_lesson_qualities(lesson_id):
+    """Return available quality variants for a lesson."""
+    user = session.get("mobile", "anonymous")
+    entry = store.get_session(user, lesson_id)
+    if not entry:
+        return jsonify({"error": "Lesson not prepared"}), 400
+
+    try:
+        from player.session import PlaybackSessionData
+        data = PlaybackSessionData.from_dict(entry)
+        qualities = data.list_qualities()
+        return jsonify({"qualities": qualities})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500

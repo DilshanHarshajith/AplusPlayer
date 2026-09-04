@@ -27,6 +27,12 @@
                 <input type="checkbox" id="watched-checkbox" onchange="onWatchedToggle(this.checked)">
                 Mark as watched
             </label>
+            <div class="quality-control">
+                <label for="quality-select">Quality:</label>
+                <select id="quality-select">
+                    <option value="auto">Auto</option>
+                </select>
+            </div>
             <div class="speed-control">
                 <label for="speed-slider">Speed: <span id="speed-value">1.0x</span></label>
                 <input type="range" id="speed-slider" min="0.5" max="4" step="0.05" value="1">
@@ -54,6 +60,8 @@
 <script>
 const lessonId = '{{ lesson_id }}';
 let playbackUrl = null;
+let availableQualities = [];
+let currentQuality = 'auto';
 
 function goBack() {
     if (document.referrer) {
@@ -120,6 +128,7 @@ async function prepareLesson() {
         
         if (response.ok && data.success) {
             playbackUrl = `/api/proxy/playback`;
+            await fetchAvailableQualities();
             initializePlayer();
         } else {
             errorDiv.textContent = data.error || 'Failed to prepare lesson';
@@ -128,6 +137,69 @@ async function prepareLesson() {
     } catch (error) {
         errorDiv.textContent = 'Network error. Please try again.';
         errorDiv.classList.remove('hidden');
+    }
+}
+
+async function fetchAvailableQualities() {
+    try {
+        const response = await fetch(`/api/lesson/${lessonId}/qualities`);
+        const data = await response.json();
+        
+        if (response.ok && data.qualities) {
+            availableQualities = data.qualities;
+            populateQualitySelector();
+        }
+    } catch (error) {
+        console.error('Failed to fetch qualities:', error);
+    }
+}
+
+function populateQualitySelector() {
+    const select = document.getElementById('quality-select');
+    select.innerHTML = '<option value="auto">Auto</option>';
+    
+    // Create a copy reversed for display (highest quality first for better UX)
+    const displayQualities = [...availableQualities].reverse();
+    
+    displayQualities.forEach(quality => {
+        const option = document.createElement('option');
+        option.value = quality.id;
+        option.textContent = quality.label;
+        select.appendChild(option);
+    });
+    
+    select.addEventListener('change', (e) => {
+        currentQuality = e.target.value;
+        applyQuality();
+        // Reset auto option text when switching to manual
+        if (currentQuality !== 'auto') {
+            const autoOption = select.querySelector('option[value="auto"]');
+            if (autoOption) {
+                autoOption.textContent = 'Auto';
+            }
+        }
+    });
+}
+
+function applyQuality() {
+    const video = document.getElementById('video-player');
+    const select = document.getElementById('quality-select');
+    
+    if (video.hls) {
+        if (currentQuality === 'auto') {
+            video.hls.currentLevel = -1; // Auto quality
+            // Reset auto option text initially
+            const autoOption = select.querySelector('option[value="auto"]');
+            if (autoOption) {
+                autoOption.textContent = 'Auto';
+            }
+        } else {
+            // Find the quality in the original array (sorted lowest to highest for HLS.js)
+            const levelIndex = availableQualities.findIndex(q => q.id === currentQuality);
+            if (levelIndex !== -1) {
+                video.hls.currentLevel = levelIndex;
+            }
+        }
     }
 }
 
@@ -212,10 +284,17 @@ function initializePlayer() {
     
     if (Hls.isSupported()) {
         const hls = new Hls();
+        video.hls = hls; // Store HLS instance for quality control
         hls.loadSource(playbackUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, function() {
             video.play();
+            // Apply initial quality selection
+            if (currentQuality !== 'auto') {
+                applyQuality();
+            }
+            // Set up quality change monitoring for auto mode
+            setupQualityMonitoring(hls);
         });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = playbackUrl;
@@ -232,12 +311,47 @@ function initializePlayer() {
     setupResumePlayback();
 }
 
+function setupQualityMonitoring(hls) {
+    const select = document.getElementById('quality-select');
+    
+    // Update auto option text when quality changes
+    const updateAutoText = () => {
+        if (select.value === 'auto' && hls.autoLevelEnabled && hls.currentLevel >= 0) {
+            updateAutoOptionText(hls.currentLevel);
+        }
+    };
+    
+    hls.on(Hls.Events.LEVEL_SWITCHED, updateAutoText);
+    hls.on(Hls.Events.FRAG_LOADING, updateAutoText);
+    
+    // Initial update
+    updateAutoText();
+}
+
+function updateAutoOptionText(levelIndex) {
+    const select = document.getElementById('quality-select');
+    const autoOption = select.querySelector('option[value="auto"]');
+    
+    if (levelIndex >= 0 && levelIndex < availableQualities.length) {
+        const quality = availableQualities[levelIndex];
+        autoOption.textContent = `Auto (${quality.label})`;
+    } else {
+        autoOption.textContent = 'Auto';
+    }
+}
+
 // Global variables for download intervals
 let downloadProgressInterval = null;
 let downloadSimulationInterval = null;
 let currentLessonId = null;
 
 async function downloadLesson() {
+    // Ask for download quality
+    const downloadQuality = await promptForDownloadQuality();
+    if (!downloadQuality) {
+        return; // User cancelled
+    }
+    
     currentLessonId = lessonId;
     const downloadBtn = document.getElementById('download-btn');
     const errorDiv = document.getElementById('lesson-error');
@@ -332,7 +446,11 @@ async function downloadLesson() {
         
         // Start the download after progress polling is set up
         const downloadResponse = await fetch(`/api/lesson/${lessonId}/download`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ quality: downloadQuality })
         });
         
         if (!downloadResponse.ok) {
@@ -381,6 +499,60 @@ async function downloadLesson() {
         downloadBtn.disabled = false;
         downloadBtn.textContent = 'Download Lesson';
     }
+}
+
+async function promptForDownloadQuality() {
+    // If qualities are not available yet, fetch them
+    if (availableQualities.length === 0) {
+        await fetchAvailableQualities();
+    }
+    
+    // Create a simple modal for quality selection
+    // Display qualities in reverse order (highest to lowest) for better UX
+    const displayQualities = [...availableQualities].reverse();
+    
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'quality-modal';
+        modal.innerHTML = `
+            <div class="quality-modal-content">
+                <h3>Select Download Quality</h3>
+                <div class="quality-options">
+                    ${displayQualities.map(q => `
+                        <button class="quality-option" data-quality="${q.id}">
+                            ${q.label}
+                        </button>
+                    `).join('')}
+                </div>
+                <button class="btn btn-secondary quality-cancel">Cancel</button>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Handle quality selection
+        modal.querySelectorAll('.quality-option').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const quality = btn.getAttribute('data-quality');
+                document.body.removeChild(modal);
+                resolve(quality);
+            });
+        });
+        
+        // Handle cancel
+        modal.querySelector('.quality-cancel').addEventListener('click', () => {
+            document.body.removeChild(modal);
+            resolve(null);
+        });
+        
+        // Close on background click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+                resolve(null);
+            }
+        });
+    });
 }
 
 document.getElementById('download-btn').addEventListener('click', downloadLesson);
