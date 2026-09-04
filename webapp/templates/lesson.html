@@ -22,7 +22,6 @@
         </div>
         
         <div class="player-controls">
-            <div id="watch-time" class="watch-time-info"></div>
             <label class="watched-toggle-player">
                 <input type="checkbox" id="watched-checkbox" onchange="onWatchedToggle(this.checked)">
                 Mark as watched
@@ -94,10 +93,6 @@ async function loadLessonDetails() {
         if (response.ok) {
             if (data.lesson) {
                 lessonTitle.textContent = data.lesson.title || 'Untitled Lesson';
-            }
-
-            if (data.user_watch_time !== undefined) {
-                document.getElementById('watch-time').textContent = `Watch Time: ${data.user_watch_time}`;
             }
 
             loadingDiv.classList.add('hidden');

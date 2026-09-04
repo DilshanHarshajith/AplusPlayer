@@ -475,10 +475,6 @@ body {
     border-radius: 8px;
 }
 
-.watch-time-info {
-    color: #888;
-}
-
 /* Playback Speed Control */
 .speed-control {
     display: flex;

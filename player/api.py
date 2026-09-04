@@ -84,7 +84,6 @@ class AplusAPI:
                  getLessonDetails(lesson_id: $id) {
                    lesson { _id title video_can_view lesson_type }
                    link_params
-                   user_watch_time
                  }
                }"""
         return self.gql(q, {"id": lesson_id})["getLessonDetails"]
@@ -95,7 +94,7 @@ class AplusAPI:
                                       $req_live_id: String) {
                  getLessonContent(link_param: $link_param, dev_model: $dev_model,
                                   req_live_id: $req_live_id) {
-                   vid_url hash key user_watch_time view_mode
+                   vid_url hash key view_mode
                  }
                }"""
         return self.gql(q, {"link_param": link_param, "dev_model": config.DEV_MODEL,
