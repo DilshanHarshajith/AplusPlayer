@@ -53,8 +53,9 @@ def api_lesson_download(lesson_id):
     store.init_progress(user, lesson_id)
 
     try:
-        # Get quality parameter from request
-        request_data = request.get_json() or {}
+        # Get quality parameter from request (silent: body may be absent,
+        # e.g. the course page's download buttons post no JSON at all)
+        request_data = request.get_json(silent=True) or {}
         quality = request_data.get("quality", "auto")
         
         api = AplusAPI(token=session["token"])
