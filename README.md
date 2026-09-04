@@ -124,13 +124,34 @@ store (`webapp/store.py`, default file `aplus_state.db`).
 # 1. Set a strong session-signing key
 export FLASK_SECRET_KEY="$(openssl rand -hex 32)"
 
-# 2. Build and run (SQLite state persists in the aplus_state volume)
+# 2. Set your host UID/GID so the container runs as your user.
+#    This avoids SQLite file-permission conflicts on the mounted ./data volume.
+#    The defaults (1000:1000) match the first non-root user on most Linux systems.
+#    If your UID/GID differ, override them:
+export APLUS_UID=$(id -u)
+export APLUS_GID=$(id -g)
+
+# 3. Build and run (SQLite state persists in the aplus_state volume)
 docker compose up --build -d
 # → http://<host>:5000
 ```
 
 See `docker-compose.yml` and `.env.example` for the supported environment
 variables (`FLASK_SECRET_KEY`, `APLUS_STATE_DB`, optional `GUNICORN_*`).
+
+> **Existing data — one-time ownership fix:** If you upgrade from a version that
+> ran the container as `appuser` (uid `10001`), the DB file is still owned by
+> that uid and the new `user: 1000:1000` container will get
+> `attempt to write a readonly database`. Fix it once:
+>
+> ```bash
+> docker run --rm -v ./data:/data python:3.12-slim chown 1000:1000 /data/aplus_state.db
+> docker run --rm -v ./data:/data python:3.12-slim chmod 644 /data/aplus_state.db
+> docker compose up --build -d
+> ```
+>
+> If your host UID/GID are not `1000/1000`, replace `1000:1000` with
+> `$(id -u):$(id -g)` and set `APLUS_UID`/`APLUS_GID` accordingly.
 
 ### Bare server — gunicorn + systemd
 

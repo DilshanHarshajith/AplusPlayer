@@ -22,7 +22,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application (secrets like .env are excluded via .dockerignore).
 COPY . .
 
-# Run as an unprivileged user.
+# Create an unprivileged user for runtime. When running via docker-compose,
+# the `user:` directive in docker-compose.yml overrides this and ensures the
+# container runs as the host's UID/GID, avoiding SQLite file-ownership
+# conflicts on the mounted ./data volume.
 RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser
