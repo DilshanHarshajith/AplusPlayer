@@ -340,15 +340,21 @@ async function downloadLesson(lessonId, button) {
     const progressDiv = document.getElementById(`progress-${lessonId}`);
     const progressFill = document.getElementById(`progress-fill-${lessonId}`);
     const progressText = document.getElementById(`progress-text-${lessonId}`);
-    
+
+    // Ask for download quality first
+    const downloadQuality = await promptForDownloadQuality(lessonId);
+    if (!downloadQuality) {
+        return; // User cancelled
+    }
+
     // Clear any existing intervals for this lesson
     if (lessonDownloadIntervals[lessonId]) clearInterval(lessonDownloadIntervals[lessonId]);
     if (lessonSimulationIntervals[lessonId]) clearInterval(lessonSimulationIntervals[lessonId]);
-    
+
     try {
         button.disabled = true;
         button.textContent = 'Starting...';
-        
+
         // Show progress bar
         if (progressDiv) progressDiv.classList.remove('hidden');
         if (progressFill) progressFill.style.width = '0%';
@@ -400,7 +406,11 @@ async function downloadLesson(lessonId, button) {
         
         // Start the download
         const response = await fetch(`/api/lesson/${lessonId}/download`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ quality: downloadQuality })
         });
         
         if (response.ok) {
@@ -475,6 +485,68 @@ async function cancelDownload(lessonId) {
         }
     } catch (e) {
         console.error('Cancel error:', e);
+    }
+}
+
+async function promptForDownloadQuality(lessonId) {
+    try {
+        const response = await fetch(`/api/lesson/${lessonId}/qualities`);
+        const data = await response.json();
+
+        let availableQualities = [];
+        if (response.ok && data.qualities) {
+            availableQualities = data.qualities;
+        }
+
+        // If no qualities returned, fail gracefully (should not happen normally)
+        if (availableQualities.length === 0) {
+            return 'auto';
+        }
+
+        const displayQualities = [...availableQualities].reverse();
+
+        return new Promise((resolve) => {
+            const modal = document.createElement('div');
+            modal.className = 'quality-modal';
+            modal.innerHTML = `
+                <div class="quality-modal-content">
+                    <h3>Select Download Quality</h3>
+                    <div class="quality-options">
+                        ${displayQualities.map(q => `
+                            <button class="quality-option" data-quality="${q.id}">
+                                ${q.label}
+                            </button>
+                        `).join('')}
+                    </div>
+                    <button class="btn btn-secondary quality-cancel">Cancel</button>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+
+            modal.querySelectorAll('.quality-option').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const quality = btn.getAttribute('data-quality');
+                    document.body.removeChild(modal);
+                    resolve(quality);
+                });
+            });
+
+            modal.querySelector('.quality-cancel').addEventListener('click', () => {
+                document.body.removeChild(modal);
+                resolve(null);
+            });
+
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                    resolve(null);
+                }
+            });
+        });
+    } catch (error) {
+        console.error('Failed to fetch qualities for prompt:', error);
+        return 'auto'; // Fallback
     }
 }
 

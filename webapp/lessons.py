@@ -77,15 +77,21 @@ def api_playback_url(lesson_id):
 @bp.route("/api/lesson/<lesson_id>/qualities")
 @login_required_api
 def api_lesson_qualities(lesson_id):
-    """Return available quality variants for a lesson."""
+    """Return available quality variants for a lesson. Prepares it if needed."""
     user = session.get("mobile", "anonymous")
-    entry = store.get_session(user, lesson_id)
-    if not entry:
-        return jsonify({"error": "Lesson not prepared"}), 400
-
     try:
-        from player.session import PlaybackSessionData
-        data = PlaybackSessionData.from_dict(entry)
+        from player.session import PlaybackSession, PlaybackSessionData
+
+        entry = store.get_session(user, lesson_id)
+        if entry:
+            data = PlaybackSessionData.from_dict(entry)
+        else:
+            api = AplusAPI(token=session["token"])
+            sess = PlaybackSession(api, lesson_id)
+            sess.prepare()
+            store.put_session(user, lesson_id, sess.to_data().to_dict())
+            data = sess.to_data()
+
         qualities = data.list_qualities()
         return jsonify({"qualities": qualities})
     except Exception as exc:  # noqa: BLE001
