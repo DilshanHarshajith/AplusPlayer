@@ -182,3 +182,18 @@ the public network. The app binds `0.0.0.0:5000` by default (`GUNICORN_BIND`).
   through the authenticated `/api/proxy/*` routes.
 - Sessions are stored server-side via Flask's session mechanism; set
   `FLASK_SECRET_KEY` in your environment for anything beyond local/dev use.
+
+## Legal Disclaimer & Terms of Use
+
+### 1. Independent Cross-Platform Client
+AplusPlayer is an unofficial, independent open-source media player developed solely to enable cross-platform playback (such as Linux and macOS) for students who hold valid, legally purchased access to educational courses. It is not affiliated with, authorized, or endorsed by the platform owners.
+
+### 2. Content Ownership & Playback
+* AplusPlayer does **not** host, store, or re-distribute copyrighted video files on external servers. Videos are retrieved directly from official course servers using valid user access.
+* All course content, media materials, and trademarks remain the sole intellectual property of their respective owners.
+* This application is provided strictly "as-is" for personal educational access and interoperability.
+
+### 3. User Responsibility & Liability
+* Users are solely responsible for ensuring their use of this application complies with their local laws, platform Terms of Service, and licensing agreements.
+* Any commercial redistribution, monetization, or unauthorized downloading of decrypted media files is strictly prohibited.
+* The developer assumes **no liability** for account suspensions, legal disputes, or damages arising from the use or misuse of this software.
