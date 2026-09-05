@@ -279,6 +279,11 @@ function setupKeyboardControls() {
                 e.preventDefault();
                 video.playbackRate = quantize(Math.max(SPEED_MIN, video.playbackRate - SPEED_STEP));
                 break;
+            case 't':
+            case 'T':
+                e.preventDefault();
+                openTimestampAddModal();
+                break;
         }
     });
 }
