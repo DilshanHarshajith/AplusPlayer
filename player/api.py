@@ -1,9 +1,28 @@
 """GraphQL client: login, course listing, lesson details/content."""
 import re
+from urllib.parse import urlparse
 
 import requests
 
 from . import config
+
+# Lesson type strings the vendor returns for non-video (file/document) lessons.
+# Anything that isn't one of these is treated as a video — matches the
+# "videos vs everything else" split the rest of the player assumes.
+_NON_VIDEO_LESSON_TYPES = {"pdf", "file", "document", "attachment"}
+
+
+def is_video_lesson(lesson_type) -> bool:
+    """Classify a lesson_type string as video (True) or file/document (False).
+
+    Aplus GraphQL returns one of several vendor-specific strings for
+    non-video lessons ("pdf", "file", ...). Anything we don't recognise
+    is treated as a video — the safer default, since the rest of the
+    player is built around the HLS prepare/proxy flow.
+    """
+    if not lesson_type:
+        return True
+    return str(lesson_type).strip().lower() not in _NON_VIDEO_LESSON_TYPES
 
 
 class AplusAPI:

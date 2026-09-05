@@ -1,7 +1,6 @@
 __pycache__/
 pycache/
-.env
-.env.*
+.*
 !.env.example
 !.dockerignore
 aplus_state.db

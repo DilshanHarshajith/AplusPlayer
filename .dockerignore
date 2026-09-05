@@ -1,16 +1,11 @@
-# Secrets & local state must never enter the image.
-.env
-*.db
-*.db-wal
-*.db-shm
-
 # VCS & caches.
-.git
-.gitignore
 __pycache__/
 *.pyc
-.pytest_cache/
-.mypy_cache/
 
 # Docs/build artifacts.
 README.md
+
+# Ignore all dotfiles except for .env.example and .dockerignore
+.*
+!.env.example
+!.dockerignore
