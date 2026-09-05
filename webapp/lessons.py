@@ -96,3 +96,78 @@ def api_lesson_qualities(lesson_id):
         return jsonify({"qualities": qualities})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 500
+
+
+@bp.route("/api/lesson/<lesson_id>/timestamps", methods=["GET"])
+@login_required_api
+def api_get_timestamps(lesson_id):
+    """Return all timestamps for a lesson."""
+    user = session.get("mobile", "anonymous")
+    try:
+        timestamps = store.get_timestamps(user, lesson_id)
+        return jsonify({"timestamps": timestamps})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.route("/api/lesson/<lesson_id>/timestamps", methods=["POST"])
+@login_required_api
+def api_add_timestamp(lesson_id):
+    """Add a new timestamp to a lesson."""
+    user = session.get("mobile", "anonymous")
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        # Validate required fields
+        if "time" not in data:
+            return jsonify({"error": "Missing required field: time"}), 400
+        
+        timestamp = {
+            "time": float(data["time"]),
+            "note": data.get("note", ""),
+            "color": data.get("color", "#7ab")
+        }
+        
+        store.add_timestamp(user, lesson_id, timestamp)
+        timestamps = store.get_timestamps(user, lesson_id)
+        return jsonify({"success": True, "timestamps": timestamps})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.route("/api/lesson/<lesson_id>/timestamps/<timestamp_id>", methods=["PUT"])
+@login_required_api
+def api_update_timestamp(lesson_id, timestamp_id):
+    """Update an existing timestamp."""
+    user = session.get("mobile", "anonymous")
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        updated = store.update_timestamp(user, lesson_id, timestamp_id, data)
+        if not updated:
+            return jsonify({"error": "Timestamp not found"}), 404
+        
+        timestamps = store.get_timestamps(user, lesson_id)
+        return jsonify({"success": True, "timestamps": timestamps})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.route("/api/lesson/<lesson_id>/timestamps/<timestamp_id>", methods=["DELETE"])
+@login_required_api
+def api_delete_timestamp(lesson_id, timestamp_id):
+    """Delete a timestamp."""
+    user = session.get("mobile", "anonymous")
+    try:
+        deleted = store.delete_timestamp(user, lesson_id, timestamp_id)
+        if not deleted:
+            return jsonify({"error": "Timestamp not found"}), 404
+        
+        timestamps = store.get_timestamps(user, lesson_id)
+        return jsonify({"success": True, "timestamps": timestamps})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500

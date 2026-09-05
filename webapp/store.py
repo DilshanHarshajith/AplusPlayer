@@ -24,6 +24,7 @@ Namespaces::
     session:<user>:<lesson>    -> JSON: serializable playback-session snapshot
     progress:<user>:<lesson>   -> JSON: download progress dict
     cancel:<user>:<lesson>     -> "1"/"0": download-cancel flag
+    timestamps:<user>:<lesson> -> JSON: array of timestamp objects
 
 The callers (lessons, downloads, proxy blueprints) pass the logged-in user
 (``session["mobile"]``) explicitly; this module never touches Flask.
@@ -167,6 +168,53 @@ def is_cancelled(user, lesson_id) -> bool:
 def set_cancelled(user, lesson_id):
     """Flag a user's in-progress download for cancellation."""
     _set(_key("cancel", user, lesson_id), "1")
+
+
+# ---------------------------------------------------------------------------
+# Timestamp storage
+# ---------------------------------------------------------------------------
+
+def put_timestamps(user, lesson_id, timestamps: list):
+    """Store timestamps for a user+lesson."""
+    _set(_key("timestamps", user, lesson_id), json.dumps(timestamps))
+
+
+def get_timestamps(user, lesson_id):
+    """Return the timestamps list for a user+lesson, or empty list if none."""
+    raw = _get(_key("timestamps", user, lesson_id))
+    return json.loads(raw) if raw else []
+
+
+def add_timestamp(user, lesson_id, timestamp: dict):
+    """Add a single timestamp to the timestamps list."""
+    timestamps = get_timestamps(user, lesson_id)
+    # Add ID if not present
+    if "id" not in timestamp:
+        timestamp["id"] = str(int(time.time() * 1000))
+    timestamps.append(timestamp)
+    put_timestamps(user, lesson_id, timestamps)
+
+
+def update_timestamp(user, lesson_id, timestamp_id: str, updated_data: dict):
+    """Update a specific timestamp by ID."""
+    timestamps = get_timestamps(user, lesson_id)
+    for i, ts in enumerate(timestamps):
+        if ts.get("id") == timestamp_id:
+            timestamps[i].update(updated_data)
+            put_timestamps(user, lesson_id, timestamps)
+            return True
+    return False
+
+
+def delete_timestamp(user, lesson_id, timestamp_id: str):
+    """Delete a specific timestamp by ID."""
+    timestamps = get_timestamps(user, lesson_id)
+    original_length = len(timestamps)
+    timestamps = [ts for ts in timestamps if ts.get("id") != timestamp_id]
+    if len(timestamps) < original_length:
+        put_timestamps(user, lesson_id, timestamps)
+        return True
+    return False
 
 
 # Ensure the schema exists the first time this module is imported.
