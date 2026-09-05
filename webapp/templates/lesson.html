@@ -15,12 +15,12 @@
     </div>
     
     <div id="lesson-error" class="error-message hidden"></div>
-    
+
     <div id="player-container" class="player-container hidden">
         <div class="video-wrapper">
             <video id="video-player" controls autoplay class="video-player"></video>
         </div>
-        
+
         <div class="player-controls">
             <label class="watched-toggle-player">
                 <input type="checkbox" id="watched-checkbox" onchange="onWatchedToggle(this.checked)">
@@ -39,7 +39,7 @@
             <button id="download-btn" class="btn btn-secondary">Download Lesson</button>
             <button id="add-timestamp-btn" class="btn btn-secondary">Add Timestamp</button>
         </div>
-        
+
         <div id="download-progress" class="download-progress hidden">
             <div class="progress-container">
                 <div class="progress-bar">
@@ -51,10 +51,27 @@
                 </div>
             </div>
         </div>
-        
+
         <div id="timestamps-container" class="timestamps-container hidden">
             <h3>Timestamps</h3>
             <div id="timestamps-list" class="timestamps-list"></div>
+        </div>
+    </div>
+
+    <div id="file-container" class="file-container hidden">
+        <div class="file-viewer">
+            <div class="file-placeholder" id="file-placeholder">
+                <p>Loading file...</p>
+            </div>
+            <iframe id="file-frame" class="file-frame" title="Lesson file"></iframe>
+        </div>
+
+        <div class="player-controls">
+            <label class="watched-toggle-player">
+                <input type="checkbox" id="watched-checkbox-file" onchange="onWatchedToggle(this.checked)">
+                Mark as read
+            </label>
+            <button id="download-file-btn" class="btn btn-secondary">Download File</button>
         </div>
     </div>
 </div>
@@ -68,6 +85,7 @@ let playbackUrl = null;
 let availableQualities = [];
 let currentQuality = 'auto';
 let timestamps = [];
+let lessonContentType = 'video'; // 'video' or 'file' (PDF/document)
 
 function goBack() {
     if (document.referrer) {
@@ -82,10 +100,13 @@ function onWatchedToggle(checked) {
 }
 
 function initWatchedCheckbox() {
-    const checkbox = document.getElementById('watched-checkbox');
-    if (checkbox) {
-        checkbox.checked = AplusPlayer.isLessonWatched(lessonId);
-    }
+    // There are two watched checkboxes (one per container) — sync whichever
+    // is currently visible to the stored preference.
+    const v = document.getElementById('watched-checkbox');
+    const f = document.getElementById('watched-checkbox-file');
+    const wanted = AplusPlayer.isLessonWatched(lessonId);
+    if (v) v.checked = wanted;
+    if (f) f.checked = wanted;
 }
 
 async function loadLessonDetails() {
@@ -96,17 +117,28 @@ async function loadLessonDetails() {
     try {
         const response = await fetch(`/api/lesson/${lessonId}/details`);
         const data = await response.json();
-        
+
         if (response.ok) {
             if (data.lesson) {
                 lessonTitle.textContent = data.lesson.title || 'Untitled Lesson';
+                // Backend adds content_type to lesson details: 'video' (HLS)
+                // or 'file' (PDF, document, image, ...). File lessons
+                // skip the whole prepare/HLS path.
+                lessonContentType = data.lesson.content_type || 'video';
             }
 
             loadingDiv.classList.add('hidden');
-            document.getElementById('player-container').classList.remove('hidden');
-            
-            // Auto-prepare the lesson
-            await prepareLesson();
+
+            if (lessonContentType === 'file') {
+                document.getElementById('file-container').classList.remove('hidden');
+                initFileViewer();
+            } else {
+                document.getElementById('player-container').classList.remove('hidden');
+                // Auto-prepare the lesson
+                await prepareLesson();
+                // Timestamps only apply to videos.
+                loadTimestamps();
+            }
         } else {
             loadingDiv.classList.add('hidden');
             errorDiv.textContent = data.error || 'Failed to load lesson details';
@@ -119,26 +151,89 @@ async function loadLessonDetails() {
     }
 }
 
+// Wire up the file viewer (PDFs, images, etc.) for non-video lessons.
+function initFileViewer() {
+    const fileUrl = `/api/lesson/${lessonId}/file`;
+    const frame = document.getElementById('file-frame');
+    const placeholder = document.getElementById('file-placeholder');
+    const downloadBtn = document.getElementById('download-file-btn');
+
+    // Hide the placeholder once the iframe has loaded
+    frame.addEventListener('load', () => {
+        if (placeholder) placeholder.classList.add('hidden');
+    }, { once: true });
+    frame.src = fileUrl;
+
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', () => {
+            // The same endpoint serves the file with Content-Disposition:
+            // attachment when ?download=1 is set.
+            window.location.href = `${fileUrl}?download=1`;
+        });
+    }
+}
+
 async function prepareLesson() {
     const errorDiv = document.getElementById('lesson-error');
-    
+
     try {
         const response = await fetch(`/api/lesson/${lessonId}/prepare`, {
             method: 'POST'
         });
         const data = await response.json();
-        
+
         if (response.ok && data.success) {
             playbackUrl = `/api/proxy/playback`;
             await fetchAvailableQualities();
             initializePlayer();
-        } else {
-            errorDiv.textContent = data.error || 'Failed to prepare lesson';
-            errorDiv.classList.remove('hidden');
+            return;
         }
+
+        // Prepare can fail because the lesson is actually a file (PDF,
+        // document) and the vendor's HLS path doesn't apply. The backend's
+        // lesson_type string is reverse-engineered and may not match what
+        // the vendor returns for *this* lesson, so we can't fully trust
+        // the first-pass classifier. Probe the file endpoint to confirm
+        // and self-correct.
+        const isFile = await probeFileEndpoint();
+        if (isFile) {
+            document.getElementById('player-container').classList.add('hidden');
+            document.getElementById('file-container').classList.remove('hidden');
+            initFileViewer();
+            return;
+        }
+
+        errorDiv.textContent = data.error || 'Failed to prepare lesson';
+        errorDiv.classList.remove('hidden');
     } catch (error) {
+        // Network error during prepare: still try the file probe — the
+        // prepare call may have failed because the lesson isn't a video
+        // at all, in which case the file endpoint (which is its own
+        // authenticated request) may still work.
+        const isFile = await probeFileEndpoint();
+        if (isFile) {
+            document.getElementById('player-container').classList.add('hidden');
+            document.getElementById('file-container').classList.remove('hidden');
+            initFileViewer();
+            return;
+        }
         errorDiv.textContent = 'Network error. Please try again.';
         errorDiv.classList.remove('hidden');
+    }
+}
+
+// Quick check: does /api/lesson/<id>/file return a usable response?
+//   200 → it's a file lesson; the backend can stream it.
+//   400 → backend says it's a video; the prepare error is the real story.
+//   502/500 → couldn't tell either way; let the prepare error stand.
+async function probeFileEndpoint() {
+    try {
+        const r = await fetch(`/api/lesson/${lessonId}/file?probe=1`, {
+            credentials: 'same-origin',
+        });
+        return r.ok;
+    } catch (e) {
+        return false;
     }
 }
 
@@ -873,7 +968,8 @@ document.getElementById('add-timestamp-btn').addEventListener('click', openTimes
 document.addEventListener('DOMContentLoaded', () => {
     initWatchedCheckbox();
     loadLessonDetails();
-    loadTimestamps();
+    // Timestamps are loaded inside loadLessonDetails for video lessons
+    // (file lessons don't have a playhead to anchor them to).
 });
 </script>
 {% endblock %}

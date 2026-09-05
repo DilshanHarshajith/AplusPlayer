@@ -14,7 +14,7 @@ import time
 
 from flask import Blueprint, Response, jsonify, request, session
 
-from player.api import AplusAPI
+from player.api import AplusAPI, classify_lesson
 from player.download_engine import download_and_remux
 from player.session import PlaybackSession
 
@@ -57,8 +57,20 @@ def api_lesson_download(lesson_id):
         # e.g. the course page's download buttons post no JSON at all)
         request_data = request.get_json(silent=True) or {}
         quality = request_data.get("quality", "auto")
-        
+
         api = AplusAPI(token=session["token"])
+
+        # Bail early for non-video lessons: PDFs and similar files are
+        # served via /api/lesson/<id>/file (with ?download=1) — trying
+        # to push them through the HLS segment path yields garbage.
+        det = api.lesson_details(lesson_id)
+        lesson = (det.get("lesson") or {})
+        if classify_lesson(lesson, det.get("link_params")) != "video":
+            store.update_progress(user, lesson_id, status="error",
+                                  message="This lesson is a file (e.g. PDF), not a video. Use the file viewer download button.")
+            return jsonify({"error": "This lesson is a file, not a video. "
+                                     "Use the file viewer to download it."}), 400
+
         data = _resolve_session(user, lesson_id, api)
         seg_paths, iv = data.list_variant_segments(quality=quality)
     except Exception as exc:  # noqa: BLE001

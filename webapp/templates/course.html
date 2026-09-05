@@ -242,12 +242,29 @@ function renderFilteredLessons() {
         group.lessons.forEach(lesson => {
             const watched = AplusPlayer.isLessonWatched(lesson._id);
             const lGroup = lesson._safeGroup;
+            // Mirror the backend classifier's first-pass. The vendor's
+            // `lesson_type` is "UPLOAD" for *both* files and videos, so
+            // it's not a reliable signal on its own; the real signal is
+            // `video_can_view` (watch time remaining in minutes — 0
+            // means the lesson is a file, not a watchable video). Use
+            // both: a known lesson_type string OR video_can_view <= 0.
+            const knownFileType = ['pdf', 'file', 'document', 'attachment']
+                .includes(String(lesson.lesson_type || '').toLowerCase());
+            const noWatchTime = Number(lesson.video_can_view || 0) <= 0;
+            const isFile = knownFileType || noWatchTime;
+            const actionLabel = isFile ? 'View' : 'Watch';
+            // Always call the self-correcting downloader; it probes the
+            // file endpoint if the HLS path fails (vendor's lesson_type
+            // string for files isn't a fixed set, so first-pass
+            // classification can miss).
+            const dlOnclick = `downloadLessonAuto('${lesson._id}', this)`;
             html += `
                 <div class="lesson-item ${watched ? 'watched' : ''}" id="lesson-${lesson._id}">
                     <div class="lesson-info">
                         <h4>${lesson.title || 'Untitled Lesson'}</h4>
                         <div class="lesson-meta">
                             ${lesson.is_free ? '<span class="badge badge-free">Free</span>' : ''}
+                            ${isFile ? '<span class="badge badge-file">File</span>' : ''}
                         </div>
                     </div>
                     <div class="lesson-card-bottom">
@@ -257,8 +274,8 @@ function renderFilteredLessons() {
                                    onchange="toggleWatched('${lesson._id}', this.checked)">
                         </label>
                         <div class="lesson-actions">
-                            <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">Watch</a>
-                            <button onclick="downloadLesson('${lesson._id}', this)" class="btn btn-secondary btn-sm download-btn">Download</button>
+                            <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">${actionLabel}</a>
+                            <button onclick="${dlOnclick}" class="btn btn-secondary btn-sm download-btn">Download</button>
                         </div>
                     </div>
                     <div class="lesson-progress hidden" id="progress-${lesson._id}">
@@ -334,6 +351,39 @@ function toggleWatched(lessonId, checked) {
 // Store download intervals for each lesson
 const lessonDownloadIntervals = {};
 const lessonSimulationIntervals = {};
+
+// For non-video lessons (PDFs, documents) the download button simply
+// navigates to the file endpoint, which streams the file to the browser.
+function downloadFileLesson(lessonId, button) {
+    button.disabled = true;
+    button.textContent = 'Downloading...';
+    const fileUrl = `/api/lesson/${lessonId}/file?download=1`;
+    // Trigger the download in a new window/tab so the course list isn't
+    // navigated away from.
+    window.open(fileUrl, '_blank');
+    setTimeout(() => {
+        button.disabled = false;
+        button.textContent = 'Download';
+    }, 2000);
+}
+
+// Dispatch the right download path for a lesson, probing the file
+// endpoint to self-correct when the vendor's lesson_type string isn't
+// in the known non-video set (first-pass classification can otherwise
+// treat a PDF as a video and fail).
+async function downloadLessonAuto(lessonId, button) {
+    try {
+        // Lightweight probe: does the backend serve this as a file?
+        const probe = await fetch(`/api/lesson/${lessonId}/file?probe=1`);
+        if (probe.ok) {
+            downloadFileLesson(lessonId, button);
+            return;
+        }
+    } catch (e) {
+        // Probe failed (network); fall through to the video path.
+    }
+    await downloadLesson(lessonId, button);
+}
 
 async function downloadLesson(lessonId, button) {
     const originalText = button.textContent;
