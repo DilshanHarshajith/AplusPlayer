@@ -352,19 +352,116 @@ function toggleWatched(lessonId, checked) {
 const lessonDownloadIntervals = {};
 const lessonSimulationIntervals = {};
 
-// For non-video lessons (PDFs, documents) the download button simply
-// navigates to the file endpoint, which streams the file to the browser.
-function downloadFileLesson(lessonId, button) {
+// Show a picker listing the card's files so the user can download any
+// subset (including a single tap for single-file cards) with one click.
+async function showFileDownloadPicker(files) {
+    return await new Promise(resolve => {
+        const checked = new Set(files.map(f => f.index));
+        const modal = document.createElement('div');
+        modal.className = 'timestamp-modal';
+        modal.innerHTML = `
+            <div class="timestamp-modal-content">
+                <h3>Select files to download</h3>
+                <div class="file-picker-list"></div>
+                <label class="file-picker-select-all">
+                    <input type="checkbox" checked>
+                    Select all
+                </label>
+                <div class="timestamp-modal-buttons">
+                    <button class="btn btn-primary file-picker-download">Download selected</button>
+                    <button class="btn btn-secondary file-picker-cancel">Cancel</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const list = modal.querySelector('.file-picker-list');
+        const selAll = modal.querySelector('.file-picker-select-all input');
+        function render() {
+            list.innerHTML = '';
+            files.forEach(f => {
+                const lbl = document.createElement('label');
+                lbl.className = 'file-picker-item';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = checked.has(f.index);
+                cb.addEventListener('change', () => {
+                    if (cb.checked) checked.add(f.index); else checked.delete(f.index);
+                    selAll.checked = checked.size === files.length;
+                });
+                const name = document.createElement('span');
+                name.textContent = f.title || f.filename || ('File ' + (f.index + 1));
+                lbl.append(cb, name);
+                list.append(lbl);
+            });
+        }
+        render();
+        selAll.addEventListener('change', () => {
+            if (selAll.checked) files.forEach(f => checked.add(f.index));
+            else checked.clear();
+            render();
+        });
+        function close(val) { if (modal.parentNode) document.body.removeChild(modal); resolve(val); }
+        modal.querySelector('.file-picker-download').addEventListener('click', () => {
+            const chosen = files.filter(f => checked.has(f.index));
+            close(chosen.length ? chosen : null);
+        });
+        modal.querySelector('.file-picker-cancel').addEventListener('click', () => close(null));
+        modal.addEventListener('click', e => { if (e.target === modal) close(null); });
+    });
+}
+
+// For non-video lessons (PDFs, documents) the download button lists the
+// card's files and downloads the selected ones (staggered so the browser
+// doesn't collapse rapid identical navigations into one).
+async function downloadFileLesson(lessonId, button) {
+    let files = [];
+    try {
+        const r = await fetch(`/api/lesson/${lessonId}/files`);
+        const data = await r.json();
+        files = (data && data.files) ? data.files : [];
+    } catch (_) {}
+    if (!files.length) {
+        // No metadata — fall back to the legacy single-file path.
+        triggerFileDownloads(lessonId, [{ index: 0 }], button);
+        return;
+    }
+    if (files.length === 1) {
+        triggerFileDownloads(lessonId, files, button);
+        return;
+    }
+    const chosen = await showFileDownloadPicker(files);
+    if (!chosen) return; // cancelled
+    triggerFileDownloads(lessonId, chosen, button);
+}
+
+function triggerFileDownloads(lessonId, files, button) {
     button.disabled = true;
-    button.textContent = 'Downloading...';
-    const fileUrl = `/api/lesson/${lessonId}/file?download=1`;
-    // Trigger the download in a new window/tab so the course list isn't
-    // navigated away from.
-    window.open(fileUrl, '_blank');
+    button.textContent = files.length > 1 ? `Downloading (${files.length})...` : 'Downloading...';
+    // A hidden <iframe> per file. Each one just *navigates* to the file
+    // endpoint, and because the response carries Content-Disposition:
+    // attachment the browser saves it as a download. This sidesteps the
+    // three failure modes of the earlier attempts:
+    //   - window.open: popups beyond the first lose the click's user
+    //     activation and are blocked by popup blockers;
+    //   - <a download> clicks: Chrome's "download multiple files"
+    //     permission silently drops all but the first;
+    //   - blob fetch: cross-origin Drive redirects would be blocked by CORS.
+    // The small stagger keeps the downloads from racing.
+    files.forEach((f, i) => {
+        const url = `/api/lesson/${lessonId}/file?index=${f.index}&download=1`;
+        setTimeout(() => {
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = url;
+            document.body.appendChild(iframe);
+            // Detach once it's had a chance to hand off to the download manager.
+            setTimeout(() => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 60000);
+        }, i * 400);
+    });
     setTimeout(() => {
         button.disabled = false;
         button.textContent = 'Download';
-    }, 2000);
+    }, Math.max(2000, files.length * 400 + 900));
 }
 
 // Dispatch the right download path for a lesson, probing the file
@@ -373,12 +470,24 @@ function downloadFileLesson(lessonId, button) {
 // treat a PDF as a video and fail).
 async function downloadLessonAuto(lessonId, button) {
     try {
-        // Lightweight probe: does the backend serve this as a file?
-        const probe = await fetch(`/api/lesson/${lessonId}/file?probe=1`);
-        if (probe.ok) {
-            downloadFileLesson(lessonId, button);
+        // Probe the file list: empty → not a file lesson; non-empty →
+        // there's at least one real file attachment to offer.
+        const r = await fetch(`/api/lesson/${lessonId}/files`);
+        const data = await r.json();
+        const files = (data && data.files) ? data.files : [];
+        if (files.length) {
+            if (files.length === 1) {
+                triggerFileDownloads(lessonId, files, button);
+            } else {
+                const chosen = await showFileDownloadPicker(files);
+                if (chosen) triggerFileDownloads(lessonId, chosen, button);
+            }
             return;
         }
+        // Legacy probe for lessons that are files but don't yet have a
+        // /files listing (single file at index 0).
+        const probe = await fetch(`/api/lesson/${lessonId}/file?probe=1`);
+        if (probe.ok) { downloadFileLesson(lessonId, button); return; }
     } catch (e) {
         // Probe failed (network); fall through to the video path.
     }

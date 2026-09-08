@@ -571,6 +571,12 @@ body {
     border-radius: 8px;
 }
 
+/* The file container's controls hold only the download button — with a
+   single child, space-between would park it on the left, so push it right. */
+#download-file-btn {
+    margin-left: auto;
+}
+
 /* Playback Speed Control */
 .speed-control {
     display: flex;
@@ -1220,4 +1226,47 @@ body {
 
 .timestamp-modal-buttons button {
     flex: 1;
+}
+
+/* File download picker (multi-file cards) */
+.file-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    max-height: 260px;
+    overflow-y: auto;
+    margin: 0.5rem 0 0.85rem;
+    padding-right: 0.25rem;
+}
+
+.file-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: #ddd;
+    font-size: 0.92rem;
+    cursor: pointer;
+}
+
+.file-picker-item input[type="checkbox"] {
+    accent-color: #7ab;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.file-picker-select-all {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #aaa;
+    font-size: 0.88rem;
+    cursor: pointer;
+    margin-bottom: 0.25rem;
+}
+
+.file-picker-select-all input[type="checkbox"] {
+    accent-color: #7ab;
+    width: 15px;
+    height: 15px;
 }
