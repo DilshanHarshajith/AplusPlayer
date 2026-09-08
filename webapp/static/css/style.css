@@ -520,27 +520,46 @@ body {
 }
 
 .file-tab {
+    background: transparent;
+    border: none;
+    color: #ccc;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color 0.2s ease;
+    white-space: nowrap;
+}
+
+.file-tab-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.45rem 0.9rem;
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.05);
-    color: #ccc;
-    font-size: 0.85rem;
-    cursor: pointer;
     transition: all 0.2s ease;
-    white-space: nowrap;
 }
 
-.file-tab:hover {
+.file-tab-item:hover {
     background: rgba(255, 255, 255, 0.1);
     color: #fff;
     border-color: rgba(255, 255, 255, 0.3);
 }
 
-.file-tab.active {
+.file-tab-item.active {
     background: #2b1d9c;
     border-color: #2b1d9c;
     color: #fff;
+}
+
+.file-tab-read {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.file-tab-read input[type="checkbox"] {
+    accent-color: #7ab;
 }
 
 .player-controls {

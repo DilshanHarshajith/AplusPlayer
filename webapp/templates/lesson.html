@@ -70,10 +70,6 @@
         </div>
 
         <div class="player-controls">
-            <label class="watched-toggle-player">
-                <input type="checkbox" id="watched-checkbox-file" onchange="onWatchedToggle(this.checked)">
-                Mark as read
-            </label>
             <button id="download-file-btn" class="btn btn-secondary">Download File</button>
         </div>
     </div>
@@ -105,13 +101,19 @@ function onWatchedToggle(checked) {
 }
 
 function initWatchedCheckbox() {
-    // There are two watched checkboxes (one per container) — sync whichever
-    // is currently visible to the stored preference.
+    // Only the video container has a single checkbox; the file container
+    // uses a per-file read list (renderFileReadList) instead.
     const v = document.getElementById('watched-checkbox');
-    const f = document.getElementById('watched-checkbox-file');
-    const wanted = AplusPlayer.isLessonWatched(lessonId);
-    if (v) v.checked = wanted;
-    if (f) f.checked = wanted;
+    if (v) v.checked = AplusPlayer.isLessonWatched(lessonId);
+}
+
+function onFileReadToggle(fileIndex, checked) {
+    AplusPlayer.setFileRead(lessonId, fileIndex, checked);
+    // Lesson-level "watched" is derived: all files read → lesson watched.
+    const all = lessonFiles.length > 0
+        ? lessonFiles.every(f => AplusPlayer.isFileRead(lessonId, f.index))
+        : checked;
+    AplusPlayer.setLessonWatched(lessonId, all);
 }
 
 async function loadLessonDetails() {
@@ -182,15 +184,11 @@ async function initFileViewer() {
 
     activeFileIndex = 0;
 
-    // Show the tab bar only when there are multiple files
-    if (tabsContainer && lessonFiles.length > 1) {
-        renderFileTabs(tabsContainer);
-        tabsContainer.classList.remove('hidden');
-    } else if (tabsContainer) {
-        tabsContainer.classList.add('hidden');
-    }
-
-    // Load the first (or only) file
+    // Always show the tab bar — each tab carries its own "read" checkbox
+    // next to the file name (falls back to a single index-0 toggle if the
+    // files list didn't load), then load the first file.
+    renderFileTabs(tabsContainer);
+    if (tabsContainer) tabsContainer.classList.remove('hidden');
     loadFileAtIndex(activeFileIndex);
 
     if (downloadBtn) {
@@ -201,18 +199,34 @@ async function initFileViewer() {
     }
 }
 
-// Render tab buttons for each attachment in the card.
+// Render a tab (with its read checkbox) per attachment in the card.
+// The checkbox toggles that file's read state without switching tabs.
 function renderFileTabs(container) {
+    if (!container) return;
     container.innerHTML = '';
-    lessonFiles.forEach((file, i) => {
+    const files = lessonFiles.length ? lessonFiles : [{ index: 0, title: 'File' }];
+    files.forEach((file, i) => {
+        const item = document.createElement('div');
+        item.className = 'file-tab-item' + (i === activeFileIndex ? ' active' : '');
+
+        const read = document.createElement('label');
+        read.className = 'file-tab-read';
+        read.title = 'Mark as read';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = AplusPlayer.isFileRead(lessonId, file.index);
+        cb.addEventListener('click', (e) => e.stopPropagation());
+        cb.addEventListener('change', () => onFileReadToggle(file.index, cb.checked));
+        read.appendChild(cb);
+
         const tab = document.createElement('button');
-        tab.className = 'file-tab' + (i === activeFileIndex ? ' active' : '');
+        tab.className = 'file-tab';
         tab.textContent = file.title || `File ${i + 1}`;
         tab.addEventListener('click', () => {
             if (i === activeFileIndex) return;
             activeFileIndex = i;
-            // Update active state on all tabs
-            container.querySelectorAll('.file-tab').forEach((t, j) => {
+            // Update active state on all tab items
+            container.querySelectorAll('.file-tab-item').forEach((t, j) => {
                 t.classList.toggle('active', j === i);
             });
             // Show the placeholder again while the new iframe loads
@@ -220,7 +234,9 @@ function renderFileTabs(container) {
             if (placeholder) placeholder.classList.remove('hidden');
             loadFileAtIndex(i);
         });
-        container.appendChild(tab);
+
+        item.append(read, tab);
+        container.appendChild(item);
     });
 }
 
