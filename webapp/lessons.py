@@ -105,10 +105,16 @@ def api_diag_lesson(lesson_id):
     return jsonify(out)
 
 
-@bp.route("/api/lesson/<lesson_id>/file")
+@bp.route("/api/lesson/<lesson_id>/files")
 @login_required_api
-def api_lesson_file(lesson_id):
-    """Stream a non-video lesson's file (PDF, document, image, ...)."""
+def api_lesson_files(lesson_id):
+    """Return metadata for every file attachment on a lesson/card.
+
+    Response: ``{"files": [{"index": 0, "title": "...", "filename": "..."}, ...]}``
+    The viewer page calls this up front instead of assuming a card is a
+    single file, so multi-file cards (e.g. a PDF plus a Word doc on the
+    same card) get a tab per attachment.
+    """
     api = AplusAPI(token=session["token"])
     try:
         det = api.lesson_details(lesson_id)
@@ -116,86 +122,137 @@ def api_lesson_file(lesson_id):
         return jsonify({"error": str(exc)}), 500
 
     lesson = (det or {}).get("lesson") or {}
-    link_params = det.get("link_params")
-    if classify_lesson(lesson, link_params) == "video":
-        return jsonify({"error": "This lesson is a video, not a file."}), 400
+    if classify_lesson(lesson, det.get("link_params")) == "video":
+        return jsonify({"files": []})
 
     try:
-        file = api.resolve_file(lesson_id)
+        files = api.resolve_files(lesson_id)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 500
-    if file is None:
-        return jsonify({"error": "Could not resolve a file URL for this lesson. "
-                                 "The vendor may not support file downloads for it."}), 502
 
-    url = file["url"]
-    headers = file.get("headers")
+    payload = []
+    for i, entry in enumerate(files):
+        payload.append({
+            "index": i,
+            "title": entry.get("title") or f"File {i + 1}",
+            "filename": _suggest_filename(entry["url"], "", f"{lesson_id}_{i}"),
+        })
+    return jsonify({"files": payload})
+
+
+@bp.route("/api/lesson/<lesson_id>/file")
+@login_required_api
+def api_lesson_file(lesson_id):
+    """Stream a non-video lesson's file (PDF, document, image, ...).
+
+    Query parameter ``index`` (0-based) selects which attachment in the
+    card to serve.  When omitted it defaults to ``0`` (the first file),
+    which keeps single-file lessons and legacy callers working unchanged.
+    ``?download=1`` forces Content-Disposition: attachment, and
+    ``?probe=1`` does a lightweight availability check without streaming
+    the body.
+    """
     try:
-        r = _upstream.get(url, headers=headers, stream=True, timeout=120)
-    except requests.RequestException as exc:
-        return jsonify({"error": f"Failed to reach lesson file: {exc}"}), 502
-    if r.status_code != 200:
-        return jsonify({"error": f"Lesson file unavailable (upstream {r.status_code})"}), 502
+        try:
+            file_index = int(request.args.get("index", "0"))
+        except (TypeError, ValueError):
+            file_index = 0
+        if file_index < 0:
+            file_index = 0
 
-    # The upstream Content-Type for Drive-hosted files is often generic
-    # ("application/octet-stream"), so we sniff the first bytes to get the
-    # *real* type + extension. If the bytes turn out to be HTML (Google
-    # returns an interstitial for large files before the download) we
-    # redirect the browser to the embeddable Drive preview instead.
-    content_type, ext = sniff_file_type(r, url)
+        api = AplusAPI(token=session["token"])
+        try:
+            det = api.lesson_details(lesson_id)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 500
 
-    drive_preview = file.get("drive_preview")
-    if _is_html(content_type):
-        r.close()
-        # ?download=1 wants the file, not a redirect — fall back to the
-        # Drive confirmation flow so the browser can complete it.
-        if request.args.get("download") == "1":
-            return redirect(drive_preview + "?export=download") if drive_preview \
-                else jsonify({"error": "Cloud file blocked the download "
-                                       "(upstream returned HTML)."}), 502
-        # Plain navigation (iframe / new tab): hand the browser the
-        # clean Drive viewer.
-        if drive_preview:
-            return redirect(drive_preview)
-        return jsonify({"error": "Cloud file unavailable "
-                                 "(upstream returned HTML)."}), 502
+        lesson = (det or {}).get("lesson") or {}
+        link_params = det.get("link_params")
+        if classify_lesson(lesson, link_params) == "video":
+            return jsonify({"error": "This lesson is a video, not a file."}), 400
 
-    filename = _suggest_filename(url, content_type, lesson_id, ext)
-    disposition = "attachment" if request.args.get("download") == "1" else "inline"
+        try:
+            files = api.resolve_files(lesson_id)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 500
+        if not files:
+            return jsonify({"error": "Could not resolve a file URL for this lesson. "
+                                     "The vendor may not support file downloads for it."}), 502
+        if file_index >= len(files):
+            return jsonify({"error": f"File index {file_index} out of range "
+                                     f"(lesson has {len(files)} file(s))."}), 404
+        file = files[file_index]
 
-    # ?probe=1: light-weight check used by the lesson page when it
-    # suspects a lesson is actually a file. Skip the body — we only
-    # need to know the upstream returned 200 + a content-type, so
-    # downloading a multi-MB PDF just to test isn't useful.
-    if request.args.get("probe") == "1":
-        r.close()
+        url = file["url"]
+        headers = file.get("headers")
+        try:
+            r = _upstream.get(url, headers=headers, stream=True, timeout=120)
+        except requests.RequestException as exc:
+            return jsonify({"error": f"Failed to reach lesson file: {exc}"}), 502
+        if r.status_code != 200:
+            return jsonify({"error": f"Lesson file unavailable (upstream {r.status_code})"}), 502
+
+        # The upstream Content-Type for Drive-hosted files is often generic
+        # ("application/octet-stream"), so we sniff the first bytes to get the
+        # *real* type + extension. If the bytes turn out to be HTML (Google
+        # returns an interstitial for large files before the download) we
+        # redirect the browser to the embeddable Drive preview instead.
+        content_type, ext = sniff_file_type(r, url)
+
+        drive_preview = file.get("drive_preview")
+        if _is_html(content_type):
+            r.close()
+            # ?download=1 wants the file, not a redirect — fall back to the
+            # Drive confirmation flow so the browser can complete it.
+            if request.args.get("download") == "1":
+                return redirect(drive_preview + "?export=download") if drive_preview \
+                    else jsonify({"error": "Cloud file blocked the download "
+                                           "(upstream returned HTML)."}), 502
+            # Plain navigation (iframe / new tab): hand the browser the
+            # clean Drive viewer.
+            if drive_preview:
+                return redirect(drive_preview)
+            return jsonify({"error": "Cloud file unavailable "
+                                     "(upstream returned HTML)."}), 502
+
+        filename = _suggest_filename(url, content_type, lesson_id, ext)
+        disposition = "attachment" if request.args.get("download") == "1" else "inline"
+
+        # ?probe=1: light-weight check used by the lesson page when it
+        # suspects a lesson is actually a file. Skip the body — we only
+        # need to know the upstream returned 200 + a content-type, so
+        # downloading a multi-MB PDF just to test isn't useful.
+        if request.args.get("probe") == "1":
+            r.close()
+            return Response(
+                status=200,
+                mimetype=content_type,
+                headers={
+                    "Content-Disposition": f'{disposition}; filename="{filename}"',
+                    "Cache-Control": "no-cache",
+                })
+
+        # The sniff may have consumed the first chunk of the stream; re-yield
+        # it first so the file isn't truncated.
+        chunk = getattr(r, "_peeked", None)
+        if chunk:
+            def _chain():
+                yield chunk
+                for c in r.iter_content(chunk_size=65536):
+                    yield c
+            chunks = _chain()
+        else:
+            chunks = (c for c in r.iter_content(chunk_size=65536))
+
         return Response(
-            status=200,
+            chunks,
             mimetype=content_type,
             headers={
                 "Content-Disposition": f'{disposition}; filename="{filename}"',
                 "Cache-Control": "no-cache",
             })
-
-    # The sniff may have consumed the first chunk of the stream; re-yield
-    # it first so the file isn't truncated.
-    chunk = getattr(r, "_peeked", None)
-    if chunk:
-        def _chain():
-            yield chunk
-            for c in r.iter_content(chunk_size=65536):
-                yield c
-        chunks = _chain()
-    else:
-        chunks = (c for c in r.iter_content(chunk_size=65536))
-
-    return Response(
-        chunks,
-        mimetype=content_type,
-        headers={
-            "Content-Disposition": f'{disposition}; filename="{filename}"',
-            "Cache-Control": "no-cache",
-        })
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
 
 
 # Magic bytes that identify common lesson-file types. The upstream headers

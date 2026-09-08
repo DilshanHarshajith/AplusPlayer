@@ -508,6 +508,60 @@ body {
     z-index: 1;
 }
 
+/* File tabs — shown only when a card has more than one attachment */
+.file-tabs {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    width: 80%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.file-tab {
+    background: transparent;
+    border: none;
+    color: #ccc;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: color 0.2s ease;
+    white-space: nowrap;
+}
+
+.file-tab-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    transition: all 0.2s ease;
+}
+
+.file-tab-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.file-tab-item.active {
+    background: #2b1d9c;
+    border-color: #2b1d9c;
+    color: #fff;
+}
+
+.file-tab-read {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.file-tab-read input[type="checkbox"] {
+    accent-color: #7ab;
+}
+
 .player-controls {
     display: flex;
     justify-content: space-between;
@@ -515,6 +569,12 @@ body {
     background: rgba(255, 255, 255, 0.05);
     padding: 1rem;
     border-radius: 8px;
+}
+
+/* The file container's controls hold only the download button — with a
+   single child, space-between would park it on the left, so push it right. */
+#download-file-btn {
+    margin-left: auto;
 }
 
 /* Playback Speed Control */
@@ -1166,4 +1226,47 @@ body {
 
 .timestamp-modal-buttons button {
     flex: 1;
+}
+
+/* File download picker (multi-file cards) */
+.file-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    max-height: 260px;
+    overflow-y: auto;
+    margin: 0.5rem 0 0.85rem;
+    padding-right: 0.25rem;
+}
+
+.file-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: #ddd;
+    font-size: 0.92rem;
+    cursor: pointer;
+}
+
+.file-picker-item input[type="checkbox"] {
+    accent-color: #7ab;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.file-picker-select-all {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #aaa;
+    font-size: 0.88rem;
+    cursor: pointer;
+    margin-bottom: 0.25rem;
+}
+
+.file-picker-select-all input[type="checkbox"] {
+    accent-color: #7ab;
+    width: 15px;
+    height: 15px;
 }

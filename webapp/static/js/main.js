@@ -46,6 +46,44 @@ function setLessonWatched(lessonId, watched) {
     localStorage.setItem(WATCHED_KEY, JSON.stringify(watchedLessons));
 }
 
+// Per-file read tracking for file lessons (a card may hold several
+// attachments, each marked read independently). Stored as
+// { [lessonId]: { [fileIndex]: true }, ... }. The lesson-level
+// "watched" flag stays separate — the file viewer derives it from
+// "all files read" (see lesson.html).
+const READ_FILES_KEY = 'aplus_read_files';
+
+// Returns { [fileIndex]: true, ... } for a lesson.
+function getReadFiles(lessonId) {
+    try {
+        const all = JSON.parse(localStorage.getItem(READ_FILES_KEY) || '{}');
+        return all[lessonId] || {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function isFileRead(lessonId, fileIndex) {
+    return !!getReadFiles(lessonId)[fileIndex];
+}
+
+function setFileRead(lessonId, fileIndex, read) {
+    let all;
+    try {
+        all = JSON.parse(localStorage.getItem(READ_FILES_KEY) || '{}');
+    } catch (error) {
+        all = {};
+    }
+    const files = all[lessonId] || {};
+    if (read) {
+        files[fileIndex] = true;
+    } else {
+        delete files[fileIndex];
+    }
+    all[lessonId] = files;
+    localStorage.setItem(READ_FILES_KEY, JSON.stringify(all));
+}
+
 // Last-watched-position tracking (stored client-side, same pattern as the
 // watched-lesson tracking above) — lets the player resume where you left off
 const POSITION_KEY = 'aplus_video_positions';
@@ -189,6 +227,9 @@ window.AplusPlayer = {
     checkAuth,
     isLessonWatched,
     setLessonWatched,
+    getReadFiles,
+    isFileRead,
+    setFileRead,
     getVideoPosition,
     setVideoPosition,
     clearVideoPosition
