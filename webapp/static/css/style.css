@@ -508,6 +508,41 @@ body {
     z-index: 1;
 }
 
+/* File tabs — shown only when a card has more than one attachment */
+.file-tabs {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    width: 80%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.file-tab {
+    padding: 0.45rem 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #ccc;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.file-tab:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.file-tab.active {
+    background: #2b1d9c;
+    border-color: #2b1d9c;
+    color: #fff;
+}
+
 .player-controls {
     display: flex;
     justify-content: space-between;

@@ -254,40 +254,17 @@ class AplusAPI:
                 return True
         return False
 
-    def resolve_file(self, lesson_id: str) -> dict | None:
-        """Resolve a non-video lesson to a fetchable file URL.
+    def _resolve_attachments(self, lesson: dict) -> list[dict]:
+        """Extract all valid file attachments from a lesson dict.
 
-        Returns ``{"url": <absolute url>, "headers": <dict> | None}``
-        for file/document lessons (PDFs, images, etc.), or ``None`` if
-        the lesson is a video (caller should use ``PlaybackSession``
-        instead).
-
-        For file lessons the vendor returns the actual file URL in
-        ``Lesson.attachments[].content`` (hosted on a public CDN like
-        ``drive.apluseducation.lk``), so that's the primary path —
-        it works without any auth header and without ever touching
-        ``getLessonContent`` (which returns "Watch time exceeded" for
-        file lessons, so the older ``vid_url``-based path is dead).
-
-        Fallbacks, in order:
-
-        1. ``lesson.attachments[].content`` — the canonical file URL.
-        2. ``link_params`` if it happens to be an http(s) URL (rare;
-           usually it's a tokenised "1234-5678" string).
-        3. The ``getLessonContent`` decrypt chain — kept for
-           forward-compatibility in case a future lesson type stores
-           the URL in the encrypted blob instead of in attachments.
+        Returns a list of ``{"title": <str>, "url": <str>,
+        "headers": <dict|None>, "drive_preview": <str|None>}``
+        objects — one per attachment whose ``content`` is a usable
+        ``https://`` URL.  Google Drive share links are rewritten to
+        their raw-download form.  Attachments whose URL isn't a
+        usable ``https://`` link are silently skipped.
         """
-        det = self.lesson_details(lesson_id)
-        lesson = (det or {}).get("lesson") or {}
-        link_params = (det or {}).get("link_params")
-
-        # Path 1: the vendor's `Lesson.attachments[].content` is the
-        # canonical place for the actual file URL. We use the first
-        # attachment with a usable https URL. Google Drive share links
-        # serve an HTML page rather than raw bytes, so we rewrite them
-        # to the raw-download form before returning — the caller will
-        # proxy the bytes and the iframe renders a clean PDF.
+        results = []
         for att in (lesson.get("attachments") or []):
             content = (att or {}).get("content")
             if not content:
@@ -295,23 +272,49 @@ class AplusAPI:
             content = str(content).strip()
             if not re.match(r"^https?://", content):
                 continue
+            entry: dict = {"title": (att or {}).get("title") or "",
+                           "url": content, "headers": None}
             drive = google_drive_links(content)
             if drive:
-                return {"url": drive["download"], "headers": None,
-                        "drive_preview": drive["preview"]}
-            return {"url": content, "headers": None}
+                entry["url"] = drive["download"]
+                entry["drive_preview"] = drive["preview"]
+            results.append(entry)
+        return results
+
+    def resolve_files(self, lesson_id: str) -> list[dict]:
+        """Resolve a non-video lesson to ALL fetchable file URLs.
+
+        Returns a (possibly empty) list of file descriptors, each
+        ``{"title": <str>, "url": <str>, "headers": <dict|None>,
+        "drive_preview": <str|None>}``.
+
+        The vendor stores file URLs in ``Lesson.attachments[].content``
+        (hosted on a public CDN like ``drive.apluseducation.lk``), and
+        a single lesson/card may have multiple attachments (e.g. a PDF
+        plus a Word document).
+
+        Fallbacks, when ``attachments`` yields zero usable entries:
+
+        1. ``link_params`` if it happens to be an http(s) URL.
+        2. The ``getLessonContent`` decrypt chain — kept for
+           forward-compatibility.
+        """
+        det = self.lesson_details(lesson_id)
+        lesson = (det or {}).get("lesson") or {}
+        link_params = (det or {}).get("link_params")
+
+        # Path 1: all vendor attachments with usable https URLs.
+        results = self._resolve_attachments(lesson)
+        if results:
+            return results
 
         # Path 2: link_params is occasionally itself the file URL
-        # (e.g. legacy lessons). It usually isn't (it's a "1234-5678"
-        # token), so this is a thin fallback.
+        # (e.g. legacy lessons).
         if link_params and re.match(r"^https?://", str(link_params).strip()):
-            return {"url": link_params.strip(), "headers": None}
+            return [{"title": "", "url": link_params.strip(),
+                     "headers": None}]
 
-        # Path 3: the video-content decrypt chain. This returns
-        # "Watch time exceeded" for any lesson where video_can_view <= 0
-        # (i.e. files), so this path almost never succeeds — but it
-        # covers the case where a future lesson type stores the URL in
-        # the encrypted blob.
+        # Path 3: the video-content decrypt chain (rare).
         if link_params and classify_lesson(lesson, link_params) == "file":
             try:
                 lc = self.lesson_content(link_params)
@@ -324,11 +327,21 @@ class AplusAPI:
                         vid_url = meta.get("stream_url") or meta.get("vid_url")
                 if vid_url and re.match(r"^https?://", vid_url) \
                         and self._looks_like_file_url(vid_url):
-                    return {"url": vid_url, "headers": None}
+                    return [{"title": "", "url": vid_url, "headers": None}]
             except (RuntimeError, requests.RequestException,
                     KeyError, TypeError, ValueError):
-                # Most file lessons fail here with "Watch time exceeded"
-                # — that's expected and not an error to surface.
                 pass
 
-        return None
+        return []
+
+    def resolve_file(self, lesson_id: str) -> dict | None:
+        """Resolve a non-video lesson to a single fetchable file URL.
+
+        Returns ``{"url": <absolute url>, "headers": <dict> | None}``
+        for the *first* file attachment, or ``None`` if the lesson is
+        a video / has no usable attachments.  Kept for callers that
+        only need one file (e.g. the diagnostic endpoint).  For
+        multi-file lessons prefer :meth:`resolve_files` instead.
+        """
+        files = self.resolve_files(lesson_id)
+        return files[0] if files else None

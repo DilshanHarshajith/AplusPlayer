@@ -59,6 +59,9 @@
     </div>
 
     <div id="file-container" class="file-container hidden">
+        <!-- Attachment tabs (visible only when the card has > 1 file) -->
+        <div id="file-tabs" class="file-tabs hidden"></div>
+
         <div class="file-viewer">
             <div class="file-placeholder" id="file-placeholder">
                 <p>Loading file...</p>
@@ -86,6 +89,8 @@ let availableQualities = [];
 let currentQuality = 'auto';
 let timestamps = [];
 let lessonContentType = 'video'; // 'video' or 'file' (PDF/document)
+let activeFileIndex = 0;       // index into the file-list for multi-file cards
+let lessonFiles = [];           // [{index, title, filename}, ...] from /files
 
 function goBack() {
     if (document.referrer) {
@@ -152,25 +157,78 @@ async function loadLessonDetails() {
 }
 
 // Wire up the file viewer (PDFs, images, etc.) for non-video lessons.
-function initFileViewer() {
-    const fileUrl = `/api/lesson/${lessonId}/file`;
+// Fetches the list of attachments up front so multi-file cards get a
+// tab bar instead of silently showing only the first file.
+async function initFileViewer() {
     const frame = document.getElementById('file-frame');
     const placeholder = document.getElementById('file-placeholder');
     const downloadBtn = document.getElementById('download-file-btn');
+    const tabsContainer = document.getElementById('file-tabs');
 
-    // Hide the placeholder once the iframe has loaded
+    // Hide the placeholder each time the iframe finishes loading (covers
+    // the initial load and any tab switch).
     frame.addEventListener('load', () => {
         if (placeholder) placeholder.classList.add('hidden');
-    }, { once: true });
-    frame.src = fileUrl;
+    });
+
+    // Fetch the full attachment list so we know whether to show tabs
+    try {
+        const resp = await fetch(`/api/lesson/${lessonId}/files`);
+        const data = await resp.json();
+        lessonFiles = (data && data.files) ? data.files : [];
+    } catch (_) {
+        lessonFiles = [];
+    }
+
+    activeFileIndex = 0;
+
+    // Show the tab bar only when there are multiple files
+    if (tabsContainer && lessonFiles.length > 1) {
+        renderFileTabs(tabsContainer);
+        tabsContainer.classList.remove('hidden');
+    } else if (tabsContainer) {
+        tabsContainer.classList.add('hidden');
+    }
+
+    // Load the first (or only) file
+    loadFileAtIndex(activeFileIndex);
 
     if (downloadBtn) {
-        downloadBtn.addEventListener('click', () => {
-            // The same endpoint serves the file with Content-Disposition:
-            // attachment when ?download=1 is set.
-            window.location.href = `${fileUrl}?download=1`;
-        });
+        downloadBtn.onclick = () => {
+            window.location.href =
+                `/api/lesson/${lessonId}/file?index=${activeFileIndex}&download=1`;
+        };
     }
+}
+
+// Render tab buttons for each attachment in the card.
+function renderFileTabs(container) {
+    container.innerHTML = '';
+    lessonFiles.forEach((file, i) => {
+        const tab = document.createElement('button');
+        tab.className = 'file-tab' + (i === activeFileIndex ? ' active' : '');
+        tab.textContent = file.title || `File ${i + 1}`;
+        tab.addEventListener('click', () => {
+            if (i === activeFileIndex) return;
+            activeFileIndex = i;
+            // Update active state on all tabs
+            container.querySelectorAll('.file-tab').forEach((t, j) => {
+                t.classList.toggle('active', j === i);
+            });
+            // Show the placeholder again while the new iframe loads
+            const placeholder = document.getElementById('file-placeholder');
+            if (placeholder) placeholder.classList.remove('hidden');
+            loadFileAtIndex(i);
+        });
+        container.appendChild(tab);
+    });
+}
+
+// Point the iframe at a specific attachment index.
+function loadFileAtIndex(index) {
+    const frame = document.getElementById('file-frame');
+    if (!frame) return;
+    frame.src = `/api/lesson/${lessonId}/file?index=${index}`;
 }
 
 async function prepareLesson() {
