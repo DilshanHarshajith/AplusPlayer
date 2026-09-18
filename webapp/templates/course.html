@@ -325,7 +325,9 @@ async function loadCourseDetails() {
                 initFilters(data.lessons);
                 lessonsContainer.classList.remove('hidden');
             } else {
-                errorDiv.textContent = 'No lessons found in this course';
+                errorDiv.textContent = (data.hidden_lesson_count || 0) > 0
+                    ? 'All lessons in this course require a subscription (hidden purchase-locked cards).'
+                    : 'No lessons found in this course';
                 errorDiv.classList.remove('hidden');
             }
         } else {

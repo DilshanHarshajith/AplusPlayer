@@ -79,6 +79,80 @@ def is_video_lesson(lesson_type) -> bool:
     return str(lesson_type).strip().lower() not in _NON_VIDEO_LESSON_TYPES
 
 
+def _pad_month(month) -> str:
+    """Normalize a lesson/subscription month to 2-digit form ("8" -> "08")."""
+    try:
+        return f"{int(month):02d}"
+    except (TypeError, ValueError):
+        return str(month or "01")
+
+
+def _year_month(year, month) -> str:
+    """Build a vendor-style "YYYY_MM" key (zero-padded month) for a lesson."""
+    return f"{year}_{_pad_month(month)}"
+
+
+def _prev_year_month(year, month) -> str:
+    """The "YYYY_MM" key one month before (year, month)."""
+    y = int(year or 0)
+    m = int(_pad_month(month))
+    if m == 1:
+        return f"{y - 1}_12"
+    return f"{y}_{m - 1:02d}"
+
+
+def _norm_year_month(key) -> str:
+    """Normalize a "2025_8"/"2025_08" subscription key to zero-padded form.
+
+    The vendor joins lesson month to year with a raw ``${year}_${month}``
+    string, so odd single-digit months would fail a naive exact match even
+    though the subscription is real. Normalizing both sides is the safe
+    direction: a lesson a normal student can watch is never hidden.
+    """
+    parts = str(key or "").split("_")
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        return f"{int(parts[0])}_{int(parts[1]):02d}"
+    return str(key or "")
+
+
+def lesson_enabled(lesson: dict | None, sub_months: list | None,
+                   course_type: str | None) -> bool:
+    """Mirror the vendor's lesson-card: is the lesson content enabled?
+
+    The official site renders "Purchase course to enable content" on a
+    card when none of these hold; we hide exactly those:
+
+    1. ``is_free`` — free lessons are always available.
+    2. Month subscription — for ``MONTHLY_CLASS`` courses the account's
+       ``sub_months`` list carries ``year_month`` keys (e.g. "2025_08")
+       and a lesson opens when its ``<year>_<month>`` matches. Other
+       course types subscribe per lesson, so ``sub_months[].year_month``
+       holds the lesson's ``_id`` instead.
+    3. ``freeForPrevMonth`` — the lesson is offered free to students who
+       paid for the *previous* month.
+    """
+    lesson = lesson or {}
+    if bool(lesson.get("is_free")):
+        return True
+
+    sub = sub_months or []
+    if course_type == "MONTHLY_CLASS":
+        ym = _year_month(lesson.get("year"), lesson.get("month"))
+        if any(_norm_year_month(s.get("year_month")) == ym for s in sub):
+            return True
+    else:
+        lesson_id = str(lesson.get("_id") or "")
+        if lesson_id and any(str(s.get("year_month")) == lesson_id for s in sub):
+            return True
+
+    if lesson.get("freeForPrevMonth"):
+        prev = _prev_year_month(lesson.get("year"), lesson.get("month"))
+        if any(_norm_year_month(s.get("year_month")) == prev for s in sub):
+            return True
+
+    return False
+
+
 def classify_lesson(lesson: dict | None, link_params: str | None = None) -> str:
     """Multi-signal "video" vs "file" verdict for a lesson.
 
@@ -190,13 +264,19 @@ class AplusAPI:
         return self.gql(q, {})["myCourses"]["myCourses"]
 
     def course_details(self, course_id: str) -> dict:
-        """Return details and lessons for a course."""
+        """Return details and lessons for a course.
+
+        ``sub_months`` + ``freeForPrevMonth`` are fetched because they are
+        how the official site decides whether a lesson card is content the
+        student has access to ("Purchase course to enable content" overlay).
+        """
         q = """query GetCourseDetails($course_id: String) {
                  getCourseDetails(course_id: $course_id, paginate_year_months: []) {
-                   course { _id title teacher_full_name payment_enabled }
-                   lessons { _id title group_name month year is_free created_at lesson_type
-                             video_can_view }
+                   course { _id title teacher_full_name payment_enabled course_type }
+                   lessons { _id title group_name month year is_free freeForPrevMonth
+                             created_at lesson_type video_can_view }
                    lessons_months { year month year_month lessons }
+                   sub_months { year month year_month }
                  }
                }"""
         return self.gql(q, {"course_id": course_id})["getCourseDetails"]
