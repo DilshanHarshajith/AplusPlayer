@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 from urllib.parse import unquote, urlsplit
 
 import requests
-from flask import Blueprint, Response, jsonify, redirect, render_template, request, session
+from flask import Blueprint, Response, jsonify, redirect, render_template, request, session, url_for
 
 from player import config
 from player.api import AplusAPI, classify_lesson, is_video_lesson
@@ -25,7 +25,18 @@ _upstream.headers["User-Agent"] = config.UA
 @login_required_page
 def lesson_page(lesson_id):
     """Render the lesson player page."""
-    return render_template("lesson.html", lesson_id=lesson_id)
+    # The course page links here with ?course=<id>, so we can send the user
+    # straight back to the course they came from. Fall back to the course
+    # list when the lesson was opened directly (bookmark, shared link, etc.).
+    course_id = request.args.get("course")
+    back_url = (
+        url_for("courses.course_page", course_id=course_id)
+        if course_id
+        else url_for("courses.courses_page")
+    )
+    return render_template(
+        "lesson.html", lesson_id=lesson_id, back_url=back_url
+    )
 
 
 @bp.route("/api/lesson/<lesson_id>/details")

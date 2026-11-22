@@ -274,7 +274,7 @@ function renderFilteredLessons() {
                                    onchange="toggleWatched('${lesson._id}', this.checked)">
                         </label>
                         <div class="lesson-actions">
-                            <a href="/lesson/${lesson._id}" class="btn btn-primary btn-sm">${actionLabel}</a>
+                            <a href="/lesson/${lesson._id}?course=${encodeURIComponent(courseId)}" class="btn btn-primary btn-sm">${actionLabel}</a>
                             <button onclick="${dlOnclick}" class="btn btn-secondary btn-sm download-btn">Download</button>
                         </div>
                     </div>

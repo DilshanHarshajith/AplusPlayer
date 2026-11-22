@@ -5,7 +5,7 @@
 {% block content %}
 <div class="lesson-container">
     <div class="page-header">
-        <a href="#" onclick="goBack()" class="back-link">← Back</a>
+        <a href="{{ back_url }}" class="back-link">← Back</a>
         <h1 id="lesson-title">Loading lesson...</h1>
     </div>
     
@@ -87,14 +87,6 @@ let timestamps = [];
 let lessonContentType = 'video'; // 'video' or 'file' (PDF/document)
 let activeFileIndex = 0;       // index into the file-list for multi-file cards
 let lessonFiles = [];           // [{index, title, filename}, ...] from /files
-
-function goBack() {
-    if (document.referrer) {
-        window.history.back();
-    } else {
-        window.location.href = '/courses';
-    }
-}
 
 function onWatchedToggle(checked) {
     AplusPlayer.setLessonWatched(lessonId, checked);
