@@ -982,6 +982,20 @@ body {
     cursor: not-allowed;
 }
 
+/* Hidden category: the tag stays visible but blurred so you can still see
+   which categories are suppressed. Right-click again to restore it. */
+.filter-chip.hidden-category {
+    filter: blur(0.8px);
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.filter-chip.hidden-category:hover {
+    background: transparent;
+    color: #ccc;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
 .filter-chip .has-content-icon {
     color: #4ade80;
     font-size: 0.8rem;

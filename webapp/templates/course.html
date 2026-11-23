@@ -50,6 +50,8 @@ let allLessons = [];
 let activeYear = 'All';
 let activeMonth = 'All';
 let activeGroup = 'All';
+// Category (group) names hidden via right-click on their chip, for this course.
+let hiddenGroups = {};
 
 const monthNamesShort = {
     '1': 'Jan', '2': 'Feb', '3': 'Mar', '4': 'Apr', '5': 'May', '6': 'Jun',
@@ -69,7 +71,23 @@ function getSafeString(val, fallback) {
     return str !== '' ? str : fallback;
 }
 
+function escapeHTML(val) {
+    return String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function isGroupHidden(group) {
+    return !!hiddenGroups[group];
+}
+
 function initFilters(lessons) {
+    hiddenGroups = AplusPlayer.getHiddenGroups(courseId);
+    setupGroupFilterEvents();
+
     allLessons = lessons.map(l => {
         // Normalize fields heavily to avoid any edge cases
         return {
@@ -89,6 +107,28 @@ function initFilters(lessons) {
 
     renderFilters();
     renderFilteredLessons();
+}
+
+// Delegated so the handlers survive renderFilters() rebuilding the chips.
+function setupGroupFilterEvents() {
+    const container = document.getElementById('group-filters');
+    if (!container || container.dataset.bound) return;
+    container.dataset.bound = 'true';
+
+    container.addEventListener('click', (event) => {
+        const chip = event.target.closest && event.target.closest('.filter-chip');
+        // A hidden category has no videos to show; only right-click restores it.
+        if (chip && !chip.classList.contains('hidden-category')) {
+            setGroup(chip.dataset.group);
+        }
+    });
+
+    container.addEventListener('contextmenu', (event) => {
+        const chip = event.target.closest && event.target.closest('.filter-chip');
+        if (!chip) return;
+        event.preventDefault(); // suppress the browser's context menu
+        toggleGroupHidden(chip.dataset.group);
+    });
 }
 
 function renderFilters() {
@@ -148,10 +188,12 @@ function renderFilters() {
     // --- Render Groups as chips on the right ---
     const groupContainer = document.getElementById('group-filters');
     if (groupContainer) {
-        let groupHTML = `<button class="filter-chip ${activeGroup === 'All' ? 'active' : ''}" onclick="setGroup('All')">All</button>`;
+        let groupHTML = `<button type="button" class="filter-chip ${activeGroup === 'All' ? 'active' : ''}" data-group="All">All</button>`;
         sortedGroups.forEach(g => {
-            const safeG = String(g).replace(/'/g, "\\'");
-            groupHTML += `<button class="filter-chip ${activeGroup === g ? 'active' : ''}" onclick="setGroup('${safeG}')">${g}</button>`;
+            const safeG = escapeHTML(g);
+            const hidden = isGroupHidden(g);
+            const hint = hidden ? 'Right-click to show this category' : 'Right-click to hide this category';
+            groupHTML += `<button type="button" class="filter-chip ${activeGroup === g ? 'active' : ''} ${hidden ? 'hidden-category' : ''}" data-group="${safeG}" title="${hint}">${safeG}</button>`;
         });
         groupContainer.innerHTML = groupHTML;
     }
@@ -189,10 +231,30 @@ window.setGroup = function(g) {
     renderFilteredLessons();
 };
 
+// Right-clicking a category chip hides its lessons but leaves the tag visible
+// (blurred). Right-clicking again restores them.
+window.toggleGroupHidden = function(group) {
+    if (group === 'All') return;
+
+    const hide = !isGroupHidden(group);
+    AplusPlayer.setGroupHidden(courseId, group, hide);
+    hiddenGroups = AplusPlayer.getHiddenGroups(courseId);
+
+    // Don't leave the filter pointing at a category that is now hidden.
+    if (hide && activeGroup === group) activeGroup = 'All';
+
+    renderFilters();
+    renderFilteredLessons();
+};
+
 function renderFilteredLessons() {
     const list = document.getElementById('lessons-list');
     
     let filtered = allLessons.filter(l => {
+        // Hidden categories are excluded entirely — no card, not even a
+        // placeholder. Their chips remain visible (blurred) in the filters.
+        if (isGroupHidden(l._safeGroup)) return false;
+
         let matchYear = (activeYear === 'All' || l._safeYear === activeYear);
         
         let matchMonth = false;
@@ -210,7 +272,10 @@ function renderFilteredLessons() {
     });
 
     if (filtered.length === 0) {
-        list.innerHTML = '<p style="color: #888;">No lessons match the selected filters.</p>';
+        const allHidden = allLessons.length > 0 && allLessons.every(l => isGroupHidden(l._safeGroup));
+        list.innerHTML = allHidden
+            ? '<p style="color: #888;">All categories are hidden. Right-click a category chip to show it again.</p>'
+            : '<p style="color: #888;">No lessons match the selected filters.</p>';
         return;
     }
 

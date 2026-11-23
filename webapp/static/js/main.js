@@ -84,6 +84,49 @@ function setFileRead(lessonId, fileIndex, read) {
     localStorage.setItem(READ_FILES_KEY, JSON.stringify(all));
 }
 
+// Hidden lesson categories (the group chips on a course page). A hidden
+// category keeps its chip visible but removes its lessons from the menu.
+// Stored per course as { [courseId]: { [groupName]: true }, ... }.
+const HIDDEN_GROUPS_KEY = 'aplus_hidden_groups';
+
+// Returns the flat { [groupName]: true } map for one course.
+function getHiddenGroups(courseId) {
+    let all;
+    try {
+        all = JSON.parse(localStorage.getItem(HIDDEN_GROUPS_KEY) || '{}');
+    } catch (error) {
+        all = {};
+    }
+    if (!all || typeof all !== 'object' || Array.isArray(all)) all = {};
+    if (!all[courseId] || typeof all[courseId] !== 'object' || Array.isArray(all[courseId])) {
+        all[courseId] = {};
+    }
+    return all[courseId];
+}
+
+function isGroupHidden(courseId, group) {
+    return !!getHiddenGroups(courseId)[group];
+}
+
+function setGroupHidden(courseId, group, hidden) {
+    let all;
+    try {
+        all = JSON.parse(localStorage.getItem(HIDDEN_GROUPS_KEY) || '{}');
+    } catch (error) {
+        all = {};
+    }
+    if (!all || typeof all !== 'object' || Array.isArray(all)) all = {};
+    if (!all[courseId] || typeof all[courseId] !== 'object' || Array.isArray(all[courseId])) {
+        all[courseId] = {};
+    }
+    if (hidden) {
+        all[courseId][group] = true;
+    } else {
+        delete all[courseId][group];
+    }
+    localStorage.setItem(HIDDEN_GROUPS_KEY, JSON.stringify(all));
+}
+
 // Last-watched-position tracking (stored client-side, same pattern as the
 // watched-lesson tracking above) — lets the player resume where you left off
 const POSITION_KEY = 'aplus_video_positions';
@@ -227,6 +270,9 @@ window.AplusPlayer = {
     checkAuth,
     isLessonWatched,
     setLessonWatched,
+    getHiddenGroups,
+    isGroupHidden,
+    setGroupHidden,
     getReadFiles,
     isFileRead,
     setFileRead,
