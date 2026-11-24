@@ -21,6 +21,10 @@
         <div class="filters-container">
             <div class="filter-side filter-side-right">
                 <div class="filter-row filter-row-dates">
+                    <label class="filter-toggle" title="Remove lessons marked as watched from the list">
+                        <input type="checkbox" id="hide-watched-checkbox" onchange="toggleHideWatched(this.checked)">
+                        Hide watched
+                    </label>
                     <select id="year-select" class="filter-select" onchange="setYear(this.value)">
                         <!-- Year options injected by JS -->
                     </select>
@@ -50,6 +54,8 @@ let allLessons = [];
 let activeYear = 'All';
 let activeMonth = 'All';
 let activeGroup = 'All';
+// Whether lessons marked as watched should be left out of the menu.
+let hideWatched = false;
 // Category (group) names hidden via right-click on their chip, for this course.
 let hiddenGroups = {};
 
@@ -86,6 +92,9 @@ function isGroupHidden(group) {
 
 function initFilters(lessons) {
     hiddenGroups = AplusPlayer.getHiddenGroups(courseId);
+    hideWatched = AplusPlayer.getHideWatched();
+    const hideWatchedCheckbox = document.getElementById('hide-watched-checkbox');
+    if (hideWatchedCheckbox) hideWatchedCheckbox.checked = hideWatched;
     setupGroupFilterEvents();
 
     allLessons = lessons.map(l => {
@@ -247,6 +256,14 @@ window.toggleGroupHidden = function(group) {
     renderFilteredLessons();
 };
 
+// Hide (or restore) watched lessons for the whole app; the choice persists in
+// localStorage so it survives a reload.
+window.toggleHideWatched = function(checked) {
+    hideWatched = !!checked;
+    AplusPlayer.setHideWatched(hideWatched);
+    renderFilteredLessons();
+};
+
 function renderFilteredLessons() {
     const list = document.getElementById('lessons-list');
     
@@ -254,6 +271,8 @@ function renderFilteredLessons() {
         // Hidden categories are excluded entirely — no card, not even a
         // placeholder. Their chips remain visible (blurred) in the filters.
         if (isGroupHidden(l._safeGroup)) return false;
+
+        if (hideWatched && AplusPlayer.isLessonWatched(l._id)) return false;
 
         let matchYear = (activeYear === 'All' || l._safeYear === activeYear);
         
@@ -273,9 +292,15 @@ function renderFilteredLessons() {
 
     if (filtered.length === 0) {
         const allHidden = allLessons.length > 0 && allLessons.every(l => isGroupHidden(l._safeGroup));
-        list.innerHTML = allHidden
-            ? '<p style="color: #888;">All categories are hidden. Right-click a category chip to show it again.</p>'
-            : '<p style="color: #888;">No lessons match the selected filters.</p>';
+        const allWatched = hideWatched && allLessons.length > 0 && allLessons.every(l =>
+            isGroupHidden(l._safeGroup) || AplusPlayer.isLessonWatched(l._id));
+        if (allHidden) {
+            list.innerHTML = '<p style="color: #888;">All categories are hidden. Right-click a category chip to show it again.</p>';
+        } else if (allWatched) {
+            list.innerHTML = '<p style="color: #888;">All lessons are marked as watched. Uncheck "Hide watched" to show them again.</p>';
+        } else {
+            list.innerHTML = '<p style="color: #888;">No lessons match the selected filters.</p>';
+        }
         return;
     }
 
@@ -409,6 +434,13 @@ async function loadCourseDetails() {
 
 function toggleWatched(lessonId, checked) {
     AplusPlayer.setLessonWatched(lessonId, checked);
+    if (hideWatched) {
+        // The card must disappear when watched and come back when unwatched
+        // (from the player page), so rebuild the list instead of just
+        // toggling a CSS class.
+        renderFilteredLessons();
+        return;
+    }
     const lessonItem = document.getElementById(`lesson-${lessonId}`);
     if (lessonItem) {
         lessonItem.classList.toggle('watched', checked);

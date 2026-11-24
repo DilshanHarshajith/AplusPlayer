@@ -127,6 +127,22 @@ function setGroupHidden(courseId, group, hidden) {
     localStorage.setItem(HIDDEN_GROUPS_KEY, JSON.stringify(all));
 }
 
+// Option to remove watched lessons from the course menu. Like the watched
+// flags themselves, this is a browser-only preference.
+const HIDE_WATCHED_KEY = 'aplus_hide_watched';
+
+function getHideWatched() {
+    try {
+        return JSON.parse(localStorage.getItem(HIDE_WATCHED_KEY) || 'false') === true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function setHideWatched(hide) {
+    localStorage.setItem(HIDE_WATCHED_KEY, JSON.stringify(!!hide));
+}
+
 // Last-watched-position tracking (stored client-side, same pattern as the
 // watched-lesson tracking above) — lets the player resume where you left off
 const POSITION_KEY = 'aplus_video_positions';
@@ -270,6 +286,8 @@ window.AplusPlayer = {
     checkAuth,
     isLessonWatched,
     setLessonWatched,
+    getHideWatched,
+    setHideWatched,
     getHiddenGroups,
     isGroupHidden,
     setGroupHidden,
