@@ -114,6 +114,8 @@ After logging in you're taken straight to your courses page, where you can:
   The chip stays visible but blurred, while every video in that category is
   removed from the list. Right-click again to restore it; hidden categories are
   remembered per course in the browser's `localStorage`.
+- Tick "Hide watched" in the course filters to leave out lessons you've marked
+  as watched. The choice is remembered in the browser's `localStorage`.
 
 ## Running as a multi-user web service
 
