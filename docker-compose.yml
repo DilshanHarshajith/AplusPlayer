@@ -32,6 +32,10 @@ services:
       FLASK_SECRET_KEY: "${FLASK_SECRET_KEY:-change-me-to-a-long-random-string}"
       # Where the shared SQLite state lives (persistent volume mounted below).
       APLUS_STATE_DB: /data/aplus_state.db
+      # Optional, PRIVATE single-user convenience: skip the login form by
+      # storing your Aplus credentials in .env. Leave unset for multi-user use.
+      APLUS_MOBILE: "${APLUS_MOBILE:-}"
+      APLUS_PASSWORD: "${APLUS_PASSWORD:-}"
       # Optional tuning (defaults are sane):
       # GUNICORN_WORKERS: "2"
       # GUNICORN_THREADS: "8"

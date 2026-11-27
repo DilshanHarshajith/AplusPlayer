@@ -98,6 +98,21 @@ together in the same directory.
 Credentials are entered directly on the web login page — every user logs in
 with their own Aplus account.
 
+For a **private, single-user** instance (e.g. Docker on your own PC) you can
+instead save your credentials in `.env` and skip the login form entirely:
+
+```bash
+cp .env.example .env
+# set APLUS_MOBILE and APLUS_PASSWORD in .env
+docker compose up -d          # recreates the container with the new variables
+```
+
+The app then signs in automatically whenever a session is missing. Logging out
+still shows the form until you log in again. Keep `.env` private: it is
+git-ignored and excluded from the Docker image, but anyone with access to the
+host filesystem can read it. Do not use this on shared or public deployments —
+leave both variables unset there so every user logs in with their own account.
+
 ## Usage
 
 ```bash
@@ -143,7 +158,8 @@ docker compose up --build -d
 ```
 
 See `docker-compose.yml` and `.env.example` for the supported environment
-variables (`FLASK_SECRET_KEY`, `APLUS_STATE_DB`, optional `GUNICORN_*`).
+variables (`FLASK_SECRET_KEY`, `APLUS_STATE_DB`, optional `APLUS_MOBILE` /
+`APLUS_PASSWORD` for a private single-user setup, and `GUNICORN_*`).
 
 > **Existing data — one-time ownership fix:** If you upgrade from a version that
 > ran the container as `appuser` (uid `10001`), the DB file is still owned by
@@ -192,7 +208,9 @@ the public network. The app binds `0.0.0.0:5000` by default (`GUNICORN_BIND`).
 ### Multi-user notes
 
 - **Login is per-account.** The form is always blank — every user enters
-  their own credentials.
+  their own credentials. Automatic login only happens when both
+  `APLUS_MOBILE` and `APLUS_PASSWORD` are configured; keep those unset on a
+  shared instance.
 - **State is user-scoped.** The store keys everything by
   `<namespace>:<user>:<lesson>`, so two users watching the *same* lesson never
   clobber each other's session or download progress.

@@ -23,7 +23,11 @@
             <button type="submit" class="btn btn-primary">Login</button>
         </form>
 
+        {% if auto_login_error %}
+        <div id="login-error" class="error-message">{{ auto_login_error }}</div>
+        {% else %}
         <div id="login-error" class="error-message hidden"></div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}
