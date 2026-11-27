@@ -125,6 +125,10 @@ After logging in you're taken straight to your courses page, where you can:
 - Watch lessons in-browser (auto-prepared, HLS via `webapp/proxy.py`)
 - Download lessons as `.mp4`/`.ts` (via `webapp/downloads.py`), with a live
   progress bar and cancel support
+- Hide a course from the courses menu with the small **✕** button in the
+  top-right corner of its card. Use **Hidden courses (N)** at the top of the
+  page to see what's hidden and unhide individual courses (or all of them).
+  This is a browser-local display preference — nothing changes on the server.
 - Hide lesson categories on a course page by right-clicking a category chip.
   The chip stays visible but blurred, while every video in that category is
   removed from the list. Right-click again to restore it; hidden categories are

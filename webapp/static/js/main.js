@@ -127,6 +127,36 @@ function setGroupHidden(courseId, group, hidden) {
     localStorage.setItem(HIDDEN_GROUPS_KEY, JSON.stringify(all));
 }
 
+// Hidden courses on the courses menu. Stored as { [courseId]: title, ... }
+// (the title lets the hidden list show names even if a course disappears from
+// the API response). Like the other UI preferences, this is browser-local.
+const HIDDEN_COURSES_KEY = 'aplus_hidden_courses';
+
+function getHiddenCourses() {
+    let all;
+    try {
+        all = JSON.parse(localStorage.getItem(HIDDEN_COURSES_KEY) || '{}');
+    } catch (error) {
+        all = {};
+    }
+    if (!all || typeof all !== 'object' || Array.isArray(all)) all = {};
+    return all;
+}
+
+function setCourseHidden(courseId, title, hidden) {
+    const all = getHiddenCourses();
+    if (hidden) {
+        all[courseId] = String(title || 'Untitled Course');
+    } else {
+        delete all[courseId];
+    }
+    localStorage.setItem(HIDDEN_COURSES_KEY, JSON.stringify(all));
+}
+
+function clearHiddenCourses() {
+    localStorage.setItem(HIDDEN_COURSES_KEY, '{}');
+}
+
 // Option to remove watched lessons from the course menu. Like the watched
 // flags themselves, this is a browser-only preference.
 const HIDE_WATCHED_KEY = 'aplus_hide_watched';
@@ -291,6 +321,9 @@ window.AplusPlayer = {
     getHiddenGroups,
     isGroupHidden,
     setGroupHidden,
+    getHiddenCourses,
+    setCourseHidden,
+    clearHiddenCourses,
     getReadFiles,
     isFileRead,
     setFileRead,

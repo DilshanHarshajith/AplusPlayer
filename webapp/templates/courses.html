@@ -7,15 +7,25 @@
     <div class="page-header">
         <h1>My Courses</h1>
         <p class="subtitle">Select a course to view lessons</p>
+        <button type="button" id="hidden-courses-toggle" class="btn btn-secondary hidden-courses-toggle hidden" onclick="toggleHiddenCoursesPanel()">Hidden courses (0)</button>
     </div>
-    
+
+    <div id="hidden-courses-panel" class="hidden-courses-panel hidden">
+        <div class="hidden-courses-header">
+            <h2>Hidden courses</h2>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="unhideAllCourses()">Unhide all</button>
+        </div>
+        <p class="subtitle">These courses are only removed from this menu — nothing changes on the server.</p>
+        <div id="hidden-courses-list" class="hidden-courses-list"></div>
+    </div>
+
     <div id="courses-loading" class="loading-spinner">
         <div class="spinner"></div>
         <p>Loading courses...</p>
     </div>
-    
+
     <div id="courses-error" class="error-message hidden"></div>
-    
+
     <div id="courses-grid" class="courses-grid hidden">
         <!-- Courses will be loaded here dynamically -->
     </div>
@@ -24,64 +34,188 @@
 
 {% block scripts %}
 <script>
-async function loadCourses() {
+let allCourses = [];
+let hiddenPanelOpen = false;
+
+function escapeHTML(val) {
+    return String(val === null || val === undefined ? '' : val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function isCourseHidden(courseId) {
+    return Object.prototype.hasOwnProperty.call(
+        AplusPlayer.getHiddenCourses(), String(courseId));
+}
+
+function renderHiddenCourses() {
+    const toggle = document.getElementById('hidden-courses-toggle');
+    const panel = document.getElementById('hidden-courses-panel');
+    const list = document.getElementById('hidden-courses-list');
+    const entries = Object.entries(AplusPlayer.getHiddenCourses())
+        .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+
+    toggle.textContent = `Hidden courses (${entries.length})`;
+    toggle.classList.toggle('hidden', entries.length === 0);
+    if (entries.length === 0) hiddenPanelOpen = false;
+    panel.classList.toggle('hidden', !hiddenPanelOpen || entries.length === 0);
+
+    // Build rows with DOM nodes rather than inline handlers so course ids
+    // never end up inside HTML/JS strings.
+    list.innerHTML = '';
+    entries.forEach(([courseId, title]) => {
+        const row = document.createElement('div');
+        row.className = 'hidden-course-item';
+
+        const label = document.createElement('span');
+        label.className = 'hidden-course-title';
+        label.textContent = title || 'Untitled Course';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary btn-sm hidden-course-unhide-btn';
+        button.dataset.courseId = courseId;
+        button.textContent = 'Unhide';
+
+        row.append(label, button);
+        list.appendChild(row);
+    });
+}
+
+function renderCourses() {
     const loadingDiv = document.getElementById('courses-loading');
     const errorDiv = document.getElementById('courses-error');
     const gridDiv = document.getElementById('courses-grid');
-    
+
+    loadingDiv.classList.add('hidden');
+    errorDiv.classList.add('hidden');
+    gridDiv.innerHTML = '';
+
+    const visibleCourses = allCourses.filter(c => !isCourseHidden(c._id));
+
+    if (allCourses.length === 0) {
+        errorDiv.textContent = 'No courses found';
+        errorDiv.classList.remove('hidden');
+        gridDiv.classList.add('hidden');
+        renderHiddenCourses();
+        return;
+    }
+
+    if (visibleCourses.length === 0) {
+        errorDiv.textContent = 'All courses are hidden. Open "Hidden courses" above to restore them.';
+        errorDiv.classList.remove('hidden');
+        gridDiv.classList.add('hidden');
+        renderHiddenCourses();
+        return;
+    }
+
+    // Sort courses by status (active first) then by title
+    const sortedCourses = [...visibleCourses].sort((a, b) => {
+        const statusA = (a.status || '').toLowerCase();
+        const statusB = (b.status || '').toLowerCase();
+        if (statusA === 'active' && statusB !== 'active') return -1;
+        if (statusB === 'active' && statusA !== 'active') return 1;
+        return (a.title || '').localeCompare(b.title || '');
+    });
+
+    gridDiv.innerHTML = sortedCourses.map(course => {
+        const status = String(course.status || 'Active');
+        const statusClass = status.toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'active';
+        const escapeId = escapeHTML(course._id);
+        return `
+            <div class="course-card">
+                <button type="button" class="btn btn-secondary course-hide-btn"
+                        data-course-id="${escapeId}" title="Hide this course from the menu"
+                        aria-label="Hide this course from the menu">&times;</button>
+                <div class="course-info">
+                    <h3>${escapeHTML(course.title || 'Untitled Course')}</h3>
+                    <p class="course-teacher">${escapeHTML(course.teacher_full_name || 'Unknown Teacher')}</p>
+                    <div class="course-meta">
+                        <span class="badge">${escapeHTML(course.subject || 'N/A')}</span>
+                        <span class="badge">${escapeHTML(course.exm_year || 'N/A')}</span>
+                        <span class="badge status-${statusClass}">${escapeHTML(status)}</span>
+                    </div>
+                </div>
+                <a href="/course/${encodeURIComponent(course._id)}" class="btn btn-secondary">View Lessons</a>
+            </div>
+        `;
+    }).join('');
+
+    gridDiv.classList.remove('hidden');
+    renderHiddenCourses();
+}
+
+async function loadCourses() {
+    const errorDiv = document.getElementById('courses-error');
+
     try {
         const response = await fetch('/api/courses');
         const data = await response.json();
-        
+
         if (response.ok && data.courses) {
-            loadingDiv.classList.add('hidden');
-            
-            if (data.courses.length === 0) {
-                errorDiv.textContent = 'No courses found';
-                errorDiv.classList.remove('hidden');
-                return;
-            }
-            
-            // Sort courses by status (active first) then by title
-            const sortedCourses = [...data.courses].sort((a, b) => {
-                // Active courses first
-                const statusA = (a.status || '').toLowerCase();
-                const statusB = (b.status || '').toLowerCase();
-                if (statusA === 'active' && statusB !== 'active') return -1;
-                if (statusB === 'active' && statusA !== 'active') return 1;
-                // Then by title alphabetically
-                return (a.title || '').localeCompare(b.title || '');
-            });
-            
-            gridDiv.innerHTML = sortedCourses.map(course => `
-                <div class="course-card">
-                    <div class="course-info">
-                        <h3>${course.title || 'Untitled Course'}</h3>
-                        <p class="course-teacher">${course.teacher_full_name || 'Unknown Teacher'}</p>
-                        <div class="course-meta">
-                            <span class="badge">${course.subject || 'N/A'}</span>
-                            <span class="badge">${course.exm_year || 'N/A'}</span>
-                            <span class="badge status-${course.status}">${course.status || 'Active'}</span>
-                        </div>
-                    </div>
-                    <a href="/course/${course._id}" class="btn btn-secondary">View Lessons</a>
-                </div>
-            `).join('');
-            
-            gridDiv.classList.remove('hidden');
+            allCourses = data.courses;
+            renderCourses();
         } else {
-            loadingDiv.classList.add('hidden');
+            document.getElementById('courses-loading').classList.add('hidden');
             errorDiv.textContent = data.error || 'Failed to load courses';
             errorDiv.classList.remove('hidden');
         }
     } catch (error) {
-        loadingDiv.classList.add('hidden');
+        document.getElementById('courses-loading').classList.add('hidden');
         errorDiv.textContent = 'Network error. Please try again.';
         errorDiv.classList.remove('hidden');
     }
 }
 
-// Load courses when page loads
-document.addEventListener('DOMContentLoaded', loadCourses);
+window.toggleHiddenCoursesPanel = function() {
+    hiddenPanelOpen = !hiddenPanelOpen;
+    document.getElementById('hidden-courses-panel').classList.toggle('hidden', !hiddenPanelOpen);
+};
+
+window.hideCourse = function(courseId) {
+    const course = allCourses.find(c => String(c._id) === String(courseId));
+    AplusPlayer.setCourseHidden(courseId, course ? course.title : 'Untitled Course', true);
+    renderCourses();
+};
+
+window.unhideCourse = function(courseId) {
+    AplusPlayer.setCourseHidden(courseId, '', false);
+    renderCourses();
+};
+
+window.unhideAllCourses = function() {
+    AplusPlayer.clearHiddenCourses();
+    hiddenPanelOpen = false;
+    renderCourses();
+};
+
+function bindCourseEvents() {
+    const grid = document.getElementById('courses-grid');
+    if (!grid.dataset.bound) {
+        grid.dataset.bound = 'true';
+        grid.addEventListener('click', event => {
+            const button = event.target.closest('.course-hide-btn');
+            if (button) hideCourse(button.dataset.courseId);
+        });
+    }
+
+    const list = document.getElementById('hidden-courses-list');
+    if (!list.dataset.bound) {
+        list.dataset.bound = 'true';
+        list.addEventListener('click', event => {
+            const button = event.target.closest('.hidden-course-unhide-btn');
+            if (button) unhideCourse(button.dataset.courseId);
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    bindCourseEvents();
+    renderHiddenCourses(); // still reachable if the courses API fails
+    loadCourses();
+});
 </script>
 {% endblock %}
