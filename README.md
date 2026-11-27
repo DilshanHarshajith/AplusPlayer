@@ -99,7 +99,7 @@ Credentials are entered directly on the web login page — every user logs in
 with their own Aplus account.
 
 For a **private, single-user** instance (e.g. Docker on your own PC) you can
-instead save your credentials in `.env` and skip the login form entirely:
+instead save your credentials in `.env`:
 
 ```bash
 cp .env.example .env
@@ -108,7 +108,11 @@ docker compose up -d          # recreates the container with the new variables
 ```
 
 The app then signs in automatically whenever a session is missing. Logging out
-still shows the form until you log in again. Keep `.env` private: it is
+shows the login form again, but it keeps a **Login as &lt;mobile&gt;** button
+that signs back in with the saved credentials in one click — you don't have to
+type the password again. The button is only shown when both variables are set;
+real environment variables override values in `.env` (so a plain
+`python3 AplusPlayer.py` run picks them up too). Keep `.env` private: it is
 git-ignored and excluded from the Docker image, but anyone with access to the
 host filesystem can read it. Do not use this on shared or public deployments —
 leave both variables unset there so every user logs in with their own account.
@@ -212,9 +216,9 @@ the public network. The app binds `0.0.0.0:5000` by default (`GUNICORN_BIND`).
 ### Multi-user notes
 
 - **Login is per-account.** The form is always blank — every user enters
-  their own credentials. Automatic login only happens when both
-  `APLUS_MOBILE` and `APLUS_PASSWORD` are configured; keep those unset on a
-  shared instance.
+  their own credentials. Automatic login and the one-click saved-account button
+  only appear when both `APLUS_MOBILE` and `APLUS_PASSWORD` are configured;
+  keep those unset on a shared instance.
 - **State is user-scoped.** The store keys everything by
   `<namespace>:<user>:<lesson>`, so two users watching the *same* lesson never
   clobber each other's session or download progress.

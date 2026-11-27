@@ -23,6 +23,16 @@
             <button type="submit" class="btn btn-primary">Login</button>
         </form>
 
+        {% if saved_mobile %}
+        <div class="saved-login">
+            <div class="saved-login-divider"><span>or</span></div>
+            <button type="button" id="saved-login-btn" class="btn btn-secondary">
+                Login as {{ saved_mobile }}
+            </button>
+            <small>Saved account — available even after you log out.</small>
+        </div>
+        {% endif %}
+
         {% if auto_login_error %}
         <div id="login-error" class="error-message">{{ auto_login_error }}</div>
         {% else %}
@@ -34,12 +44,17 @@
 
 {% block scripts %}
 <script>
+function showLoginError(message) {
+    const errorDiv = document.getElementById('login-error');
+    errorDiv.textContent = message;
+    errorDiv.classList.remove('hidden');
+}
+
 document.getElementById('login-form').addEventListener('submit', async function(e) {
     e.preventDefault();
 
     const mobile = document.getElementById('mobile').value;
     const password = document.getElementById('password').value;
-    const errorDiv = document.getElementById('login-error');
 
     try {
         const response = await fetch('/api/login', {
@@ -55,13 +70,36 @@ document.getElementById('login-form').addEventListener('submit', async function(
         if (response.ok && data.success) {
             window.location.href = '/courses';
         } else {
-            errorDiv.textContent = data.error || 'Login failed';
-            errorDiv.classList.remove('hidden');
+            showLoginError(data.error || 'Login failed');
         }
     } catch (error) {
-        errorDiv.textContent = 'Network error. Please try again.';
-        errorDiv.classList.remove('hidden');
+        showLoginError('Network error. Please try again.');
     }
 });
+
+const savedLoginBtn = document.getElementById('saved-login-btn');
+if (savedLoginBtn) {
+    savedLoginBtn.addEventListener('click', async function() {
+        const originalLabel = savedLoginBtn.textContent;
+        savedLoginBtn.disabled = true;
+        savedLoginBtn.textContent = 'Logging in…';
+
+        try {
+            const response = await fetch('/api/login/saved', { method: 'POST' });
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                window.location.href = '/courses';
+                return;
+            }
+            showLoginError(data.error || 'Saved login failed');
+        } catch (error) {
+            showLoginError('Network error. Please try again.');
+        } finally {
+            savedLoginBtn.disabled = false;
+            savedLoginBtn.textContent = originalLabel;
+        }
+    });
+}
 </script>
 {% endblock %}
