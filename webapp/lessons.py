@@ -445,7 +445,7 @@ def api_add_timestamp(lesson_id):
         timestamp = {
             "time": float(data["time"]),
             "note": data.get("note", ""),
-            "color": data.get("color", "#7ab")
+            "color": data.get("color", "#ffffff")
         }
         
         store.add_timestamp(user, lesson_id, timestamp)

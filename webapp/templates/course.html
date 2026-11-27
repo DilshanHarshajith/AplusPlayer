@@ -295,11 +295,11 @@ function renderFilteredLessons() {
         const allWatched = hideWatched && allLessons.length > 0 && allLessons.every(l =>
             isGroupHidden(l._safeGroup) || AplusPlayer.isLessonWatched(l._id));
         if (allHidden) {
-            list.innerHTML = '<p style="color: #888;">All categories are hidden. Right-click a category chip to show it again.</p>';
+            list.innerHTML = '<p style="color: var(--text-muted);">All categories are hidden. Right-click a category chip to show it again.</p>';
         } else if (allWatched) {
-            list.innerHTML = '<p style="color: #888;">All lessons are marked as watched. Uncheck "Hide watched" to show them again.</p>';
+            list.innerHTML = '<p style="color: var(--text-muted);">All lessons are marked as watched. Uncheck "Hide watched" to show them again.</p>';
         } else {
-            list.innerHTML = '<p style="color: #888;">No lessons match the selected filters.</p>';
+            list.innerHTML = '<p style="color: var(--text-muted);">No lessons match the selected filters.</p>';
         }
         return;
     }
