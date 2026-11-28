@@ -1,7 +1,7 @@
 """Home redirect, course listing, and course-detail pages/API."""
 from flask import Blueprint, jsonify, redirect, render_template, session, url_for
 
-from player.api import AplusAPI, lesson_enabled
+from player.api import AplusAPI, is_live_lesson, lesson_enabled
 
 from .decorators import login_required_api, login_required_page
 
@@ -48,7 +48,9 @@ def api_course_details(course_id):
 
     Lessons the student hasn't paid for (the vendor's "Purchase course to
     enable content" cards) are filtered out so the menu only shows content
-    that can actually be watched/downloaded.
+    that can actually be watched/downloaded. Live/Zoom classes are exempt:
+    they're meetings rather than video content, and are shown so the student
+    can see the schedule and request a join link.
     """
     try:
         api = AplusAPI(token=session["token"])
@@ -59,7 +61,8 @@ def api_course_details(course_id):
         all_lessons = data.get("lessons") or []
         shown_lessons = [
             lesson for lesson in all_lessons
-            if lesson_enabled(lesson, sub_months, course_type)
+            if is_live_lesson(lesson)
+            or lesson_enabled(lesson, sub_months, course_type)
         ]
         data["lessons"] = shown_lessons
         data["hidden_lesson_count"] = len(all_lessons) - len(shown_lessons)

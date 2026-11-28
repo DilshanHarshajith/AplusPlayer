@@ -8,7 +8,8 @@ import requests
 from flask import Blueprint, Response, jsonify, redirect, render_template, request, session, url_for
 
 from player import config
-from player.api import AplusAPI, classify_lesson, is_video_lesson
+from player.api import AplusAPI, classify_lesson, is_live_lesson, \
+    is_live_stream_lesson, is_video_lesson
 from player.session import PlaybackSession
 
 from . import store
@@ -47,13 +48,17 @@ def api_lesson_details(lesson_id):
         api = AplusAPI(token=session["token"])
         det = api.lesson_details(lesson_id)
         lesson = (det.get("lesson") or {})
-        # Let the frontend know whether this lesson is a video or a plain
-        # file/document (PDF etc.) so it can render the right viewer.
-        # classify_lesson uses several signals (lesson_type, video_can_view,
-        # link_params shape) so we don't have to guess a single vendor
-        # string for "this is a PDF".
+        # Let the frontend know which viewer to use. LIVE_STREAM lessons have
+        # a real (unencrypted) HLS stream; only true Zoom classes need the join
+        # panel. Both can carry a nonzero video_can_view, so classify_lesson
+        # alone would send the browser down the wrong path.
         link_params = det.get("link_params")
-        lesson["content_type"] = classify_lesson(lesson, link_params)
+        if is_live_stream_lesson(lesson):
+            lesson["content_type"] = "live_stream"
+        elif is_live_lesson(lesson):
+            lesson["content_type"] = "live"
+        else:
+            lesson["content_type"] = classify_lesson(lesson, link_params)
         return jsonify(det)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 500
@@ -113,6 +118,267 @@ def api_diag_lesson(lesson_id):
     out["classify_lesson_verdict"] = classify_lesson(lesson, out.get("link_params_raw"))
 
     _json.dump(out, open("/tmp/aplus_diag.json", "w"), indent=2, default=str)
+    return jsonify(out)
+
+
+_ZOOM_RE = re.compile(r"https?://[^\s\"'<>]*zoom\.(?:us|com)[^\s\"'<>]*", re.I)
+
+
+def _find_zoom(obj):
+    """Recursively find the first Zoom URL anywhere in a response."""
+    if isinstance(obj, str):
+        m = _ZOOM_RE.search(obj)
+        return m.group(0) if m else None
+    if isinstance(obj, dict):
+        for v in obj.values():
+            r = _find_zoom(v)
+            if r:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _find_zoom(v)
+            if r:
+                return r
+    return None
+
+
+def _live_ids(obj, parent_key=""):
+    """Collect ids of entries sitting under live/zoom-looking keys."""
+    ids = []
+    if isinstance(obj, dict):
+        if re.search(r"live|zoom", parent_key, re.I):
+            for k in ("_id", "id", "live_id"):
+                if isinstance(obj.get(k), (str, int)):
+                    ids.append(str(obj[k]))
+        for k, v in obj.items():
+            ids += _live_ids(v, k)
+    elif isinstance(obj, list):
+        for v in obj:
+            ids += _live_ids(v, parent_key)
+    return ids
+
+
+def _next_ids(oid, n=3):
+    """Mongo ObjectIds created back-to-back are consecutive: the live entry of
+    a ZOOM lesson sits right after the lesson id (e.g. ...5c -> ...5d)."""
+    if not isinstance(oid, str) or not re.fullmatch(r"[0-9a-f]{24}", oid):
+        return []
+    return [format(int(oid, 16) + i, "024x") for i in range(1, n + 1)]
+
+
+def _trim(obj, n=300):
+    if isinstance(obj, str):
+        return obj if len(obj) <= n else obj[:n] + "..."
+    if isinstance(obj, dict):
+        return {k: _trim(v, n) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_trim(v, n) for v in obj]
+    return obj
+
+
+def _lesson_selection(api):
+    """Ask the vendor schema which fields a Lesson has and build a selection
+    set from every scalar (plus one level of nested objects). Returns None
+    when introspection is unavailable."""
+    tref = "kind name ofType { kind name ofType { kind name ofType { kind name } } }"
+    try:
+        data = api.gql("query { __schema { queryType { name } types { name kind "
+                       "fields { name args { name type { kind } } type { %s } } } } }" % tref, {})
+    except Exception:  # noqa: BLE001
+        return None
+    sch = data["__schema"]
+    types = {t["name"]: t for t in sch["types"] if t.get("name")}
+
+    def named(tr):
+        while tr and not tr.get("name"):
+            tr = tr.get("ofType")
+        return tr or {}
+
+    def fields(tname):
+        return (types.get(tname) or {}).get("fields") or []
+
+    def usable(f):
+        return not any((a.get("type") or {}).get("kind") == "NON_NULL" for a in f.get("args") or [])
+
+    gld = next((f for f in fields(sch["queryType"]["name"]) if f["name"] == "getLessonDetails"), None)
+    if not gld:
+        return None
+    ret = named(gld["type"]).get("name")
+    lf = next((f for f in fields(ret) if f["name"] == "lesson"), None)
+    if not lf:
+        return None
+    parts = []
+    for f in fields(named(lf["type"]).get("name")):
+        if not usable(f):
+            continue
+        nt = named(f["type"])
+        if nt.get("kind") in ("SCALAR", "ENUM"):
+            parts.append(f["name"])
+        elif nt.get("kind") == "OBJECT":
+            sub = [x["name"] for x in fields(nt["name"])
+                   if usable(x) and named(x["type"]).get("kind") in ("SCALAR", "ENUM")]
+            if sub:
+                parts.append("%s { %s }" % (f["name"], " ".join(sub)))
+    return " ".join(parts) or None
+
+
+def _live_content(api, link_params, req_live_id):
+    """Same request the official site sends for "Get Link": vid_url only
+    (a Zoom lesson has no HLS hash/key to return)."""
+    from player import config as _cfg
+
+    q = ("query GetLessonContent($link_param: String, $dev_model: String, $req_live_id: String) "
+         "{ getLessonContent(link_param: $link_param, dev_model: $dev_model, "
+         "req_live_id: $req_live_id) { vid_url } }")
+    return api.gql(q, {"link_param": link_params, "dev_model": _cfg.DEV_MODEL,
+                       "req_live_id": req_live_id})["getLessonContent"]
+
+
+def _live_probe(api, lesson_id):
+    """Work out the Zoom join link for a live lesson.
+
+    Mirrors the official site's "Attend Now -> Get Link" button: read the
+    lesson's live entries, then ask getLessonContent for each one
+    (req_live_id). Any Zoom URL found in a response is returned.
+    """
+    out = {"zoom_url": None, "attempts": [], "lesson_fields": None}
+    sel = _lesson_selection(api)
+    out["lesson_fields"] = sel
+    det = None
+    if sel:
+        try:
+            det = api.gql("query($id: String){ getLessonDetails(lesson_id: $id) "
+                          "{ lesson { %s } link_params } }" % sel, {"id": lesson_id})["getLessonDetails"]
+        except Exception as exc:  # noqa: BLE001
+            out["details_error"] = str(exc)
+    if det is None:
+        det = api.lesson_details(lesson_id)
+    out["lesson_raw"] = _trim(det)
+    out["zoom_url"] = _find_zoom(det)
+    link_params = (det or {}).get("link_params")
+    if out["zoom_url"] or not link_params:
+        return out
+
+    # The official client sends req_live_id = the id of the live entry. Use ids
+    # found in the lesson data first, then the ids right after the lesson id.
+    lesson = (det or {}).get("lesson") or {}
+    cands = list(dict.fromkeys(
+        _live_ids(det) + _next_ids(lesson.get("_id")) + [lesson.get("_id") or "", "1", "0"]))
+    cands = [c for c in cands if c]
+    for i, cand in enumerate(cands[:10]):
+        try:
+            # link_params is single-use: getLessonContent burns it, so every
+            # later guess with the same token would fail with "This lesson
+            # link is not valid for your account". Ask for a fresh one each
+            # time (the first request can use the token we already have).
+            lp = link_params if i == 0 else (api.lesson_details(lesson_id) or {}).get("link_params")
+            if not lp:
+                out["attempts"].append({"req_live_id": cand, "error": "No lesson link available"})
+                continue
+            lc = _live_content(api, lp, cand)
+            out["attempts"].append({"req_live_id": cand, "vid_url": _trim((lc or {}).get("vid_url"))})
+            url = _find_zoom((lc or {}).get("vid_url"))
+            if url:
+                out["zoom_url"] = url
+                break
+        except Exception as exc:  # noqa: BLE001
+            out["attempts"].append({"req_live_id": cand, "error": str(exc)})
+    return out
+
+
+@bp.route("/api/lesson/<lesson_id>/live-link", methods=["POST"])
+@login_required_api
+def api_live_link(lesson_id):
+    """Return the Zoom join link for a live lesson.
+
+    The vendor sometimes needs a moment (or a second request) before the link
+    is ready, so retry a couple of times unless the failure is clearly an
+    authentication problem.
+    """
+    import time as _time
+    from flask import current_app
+
+    api = AplusAPI(token=session["token"])
+    probe, tries = {}, 0
+    for tries in range(1, 4):
+        try:
+            probe = _live_probe(api, lesson_id)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 500
+        if probe.get("zoom_url"):
+            break
+        errs = [a.get("error") or "" for a in probe.get("attempts", []) if a.get("error")]
+        if any(re.search(r"unauthor|expired|jwt|token|login", e, re.I) for e in errs):
+            break
+        # Pure "not valid" answers are deterministic - retrying will not help
+        if errs and all(re.search(r"not valid|invalid", e, re.I) for e in errs):
+            break
+        if tries < 3:
+            _time.sleep(1.5)
+
+    errs = [(a.get("req_live_id"), a.get("error")) for a in probe.get("attempts", []) if a.get("error")]
+    if probe.get("zoom_url"):
+        via = next((a.get("req_live_id") for a in probe["attempts"]
+                    if a.get("vid_url") and _find_zoom(a.get("vid_url"))), "details")
+        current_app.logger.warning("live-link OK lesson=%s via req_live_id=%r after %d try(s)", lesson_id, via, tries)
+        return jsonify({"url": probe["zoom_url"]})
+
+    # Prefer the error from a real live id over the blind guesses
+    best = (next((e for rid, e in errs if e and "req_live_id" in e), None)
+            or (errs[-1][1] if errs else None))
+    current_app.logger.warning("live-link FAILED lesson=%s tries=%d errors=%r", lesson_id, tries, errs)
+    msg = ("The vendor server said: " + best) if best else "Could not get the Zoom link automatically."
+    return jsonify({"error": msg, "debug": probe}), 502
+
+
+@bp.route("/api/_diag/live/<lesson_id>")
+@login_required_api
+def api_diag_live(lesson_id):
+    """TEMPORARY: full debug output of the live-link discovery."""
+    try:
+        return jsonify(_live_probe(AplusAPI(token=session["token"]), lesson_id))
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": repr(exc)}), 500
+
+
+@bp.route("/api/_diag/live-schema")
+@login_required_api
+def api_diag_live_schema():
+    """TEMPORARY: list the vendor GraphQL operations/fields that look
+    related to live classes / Zoom, so the real "join live" call can be
+    wired up. Open it in the browser while logged in.
+    """
+    import re as _re
+
+    q = """query Introspect { __schema {
+             queryType { name } mutationType { name }
+             types { name kind fields { name args { name } } } } }"""
+    api = AplusAPI(token=session.get("token", ""))
+    try:
+        schema = api.gql(q, {})["__schema"]
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({
+            "error": repr(exc),
+            "hint": "Introspection looks disabled. Capture the request from "
+                    "the official site instead (DevTools > Network).",
+        }), 500
+
+    pat = _re.compile(r"live|zoom|meet|join|webinar|session|class", _re.I)
+    types = {t["name"]: t for t in schema.get("types", []) if t.get("name")}
+    roots = {k: (schema.get(k) or {}).get("name") for k in ("queryType", "mutationType")}
+
+    def fields(type_name):
+        return [{"name": f["name"], "args": [a["name"] for a in f.get("args") or []]}
+                for f in (types.get(type_name) or {}).get("fields") or []]
+
+    out = {"matching_queries": [], "matching_mutations": [], "lesson_like_types": {}}
+    for key, label in (("queryType", "matching_queries"), ("mutationType", "matching_mutations")):
+        out[label] = [f for f in fields(roots[key]) if pat.search(f["name"])]
+    for name, t in types.items():
+        if name.startswith("__") or not t.get("fields"):
+            continue
+        if _re.search(r"lesson|live|zoom", name, _re.I):
+            out["lesson_like_types"][name] = [f["name"] for f in t["fields"]]
     return jsonify(out)
 
 

@@ -304,6 +304,223 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// Shared helpers used by the live-class UI below
+// HTML-escape helper for values interpolated into innerHTML
+function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function readJSON(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key) || '') || fallback; } catch (e) { return fallback; }
+}
+function writeJSON(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage full/blocked */ }
+}
+
+// Small non-blocking message at the bottom of the screen
+function toast(message, ms) {
+    let box = document.getElementById('toast-box');
+    if (!box) { box = document.createElement('div'); box.id = 'toast-box'; document.body.appendChild(box); }
+    const t = document.createElement('div');
+    t.className = 'toast'; t.textContent = message; box.appendChild(t);
+    setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, ms || 3500);
+}
+
+
+// ---------------------------------------------------------------------
+// Live classes: status chip, countdown, reminders
+// ---------------------------------------------------------------------
+const LIVE_WINDOW_MIN = 180;   // how long a class is considered "live"
+const LIVE_SOON_MIN = 10;      // "starting soon" / reminder lead time
+const LIVE_TIMES_KEY = 'aplus_live_times';
+const REMIND_KEY = 'aplus_live_reminders';
+
+function parseLiveDate(title) {
+    const m = /(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/.exec(title || '');
+    return m ? { y: +m[1], mo: +m[2], d: +m[3] } : null;
+}
+
+const HIDE_OLD_LIVE_KEY = 'aplus_hide_old_live';
+
+function getHideOldLive() {
+    try {
+        return JSON.parse(localStorage.getItem(HIDE_OLD_LIVE_KEY) || 'false') === true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function setHideOldLive(hide) {
+    localStorage.setItem(HIDE_OLD_LIVE_KEY, JSON.stringify(!!hide));
+}
+
+// Titles are "2027 LIVE 11.28": 2027 is the exam year, 11.28 is the class
+// date. parseLiveDate only understands YYYY-MM-DD, so also accept MM.DD /
+// MM-DD / MM/DD here. Skip clock times like "7.30 pm".
+function parseLiveClassDate(title) {
+    const full = parseLiveDate(title);
+    if (full) return full;
+    const s = String(title || '');
+    const m = /(?:^|[^\d])(\d{1,2})[.\/-](\d{1,2})(?!\d)/.exec(s);
+    if (!m || /\s*[ap]\.?m/i.test(s.slice(m.index + m[0].length))) return null;
+    const mo = +m[1], d = +m[2];
+    return (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) ? { mo: mo, d: d } : null;
+}
+
+// Title dates carry the exam year ("2027 LIVE 11.28" on 2026-11-28), so only
+// the month/day is meaningful. Undated classes stay visible — they may be
+// happening right now. Course classes all belong to the same calendar year.
+function isOldLiveLesson(lesson, now) {
+    now = now || new Date();
+    const dt = parseLiveClassDate((lesson && lesson.title) || '');
+    if (dt) {
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const day = new Date(now.getFullYear(), dt.mo - 1, dt.d);
+        return day < today;
+    }
+    // Undated titles (e.g. "Paper live -10") still carry the vendor's
+    // month/year — treat anything from an earlier month as old too.
+    const month = Number((lesson || {}).month);
+    const year = Number((lesson || {}).year);
+    if (!Number.isFinite(month) || month < 1 || month > 12) return false;
+    if (!Number.isFinite(year) || year > now.getFullYear()) return false;
+    return year < now.getFullYear() || month < now.getMonth() + 1;
+}
+function parseLiveTime(title) {
+    const s = String(title || '').replace(/\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}/g, ' ');
+    let m = /\b(\d{1,2})(?:[:.](\d{2}))?\s*([ap])\.?m\b/i.exec(s);          // 7 PM, 7.30 pm
+    if (m) { let h = +m[1] % 12; if (/p/i.test(m[3])) h += 12; return { h: h, mi: +(m[2] || 0) }; }
+    m = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(s);                             // 19:30
+    return m ? { h: +m[1], mi: +m[2] } : null;
+}
+function getLiveTimes() { return readJSON(LIVE_TIMES_KEY, {}); }
+function saveLiveTime(id, hhmm, asDefault) {
+    const t = getLiveTimes();
+    if (asDefault) t._default = hhmm; else t[id] = hhmm;
+    writeJSON(LIVE_TIMES_KEY, t);
+}
+// state: live | soon | upcoming | future | today | ended | unknown
+function liveInfo(lesson, now) {
+    now = now || new Date();
+    const title = lesson.title || '';
+    const dt = parseLiveDate(title);
+    if (!dt) return { state: 'unknown' };
+    const times = getLiveTimes();
+    let tm = parseLiveTime(title);
+    if (!tm) {
+        const v = times[lesson._id] || times._default;
+        if (v) { const parts = v.split(':').map(Number); tm = { h: parts[0], mi: parts[1] }; }
+    }
+    const day = new Date(dt.y, dt.mo - 1, dt.d);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const days = Math.round((day - today) / 864e5);
+    if (!tm) {
+        if (days < 0) return { state: 'ended' };
+        return days === 0 ? { state: 'today', needsTime: true } : { state: 'future', days: days, needsTime: true };
+    }
+    const start = new Date(dt.y, dt.mo - 1, dt.d, tm.h, tm.mi);
+    const diff = (start - now) / 60000;
+    if (diff > LIVE_SOON_MIN) return { state: days > 0 ? 'future' : 'upcoming', start: start, days: days };
+    if (diff > 0) return { state: 'soon', start: start };
+    if (-diff < LIVE_WINDOW_MIN) return { state: 'live', start: start };
+    return { state: 'ended', start: start };
+}
+function fmtClock(d) { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+function liveLabel(i) {
+    switch (i.state) {
+        case 'live': return 'LIVE NOW';
+        case 'soon': case 'upcoming': {
+            const s = Math.max(0, Math.round((i.start - new Date()) / 1000));
+            const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+            return 'Starts in ' + (h ? h + 'h ' + m + 'm' : m + 'm ' + String(x).padStart(2, '0') + 's');
+        }
+        case 'future': return i.days === 1 ? 'Tomorrow' + (i.start ? ' \u00b7 ' + fmtClock(i.start) : '') : 'In ' + i.days + ' days';
+        case 'today': return 'TODAY';
+        case 'ended': return 'Ended';
+        default: return '';
+    }
+}
+function liveChipHTML(l) {
+    const info = liveInfo(l);
+    if (info.state === 'unknown') return '<span class="live-chip unknown"><span class="live-dot"></span>LIVE</span>';
+    return '<span class="live-chip ' + info.state + '" data-live-id="' + esc(l._id) + '" data-live-title="' + esc(l.title || '') +
+           '"><span class="live-dot"></span><span class="live-text">' + esc(liveLabel(info)) + '</span></span>';
+}
+function startLiveTicker() {
+    if (window.__liveTicker) return;
+    window.__liveTicker = setInterval(() => {
+        document.querySelectorAll('[data-live-id]').forEach(el => {
+            const info = liveInfo({ _id: el.dataset.liveId, title: el.dataset.liveTitle });
+            el.className = 'live-chip ' + info.state;
+            const t = el.querySelector('.live-text'); if (t) t.textContent = liveLabel(info);
+        });
+    }, 1000);
+}
+function askLiveTime(lessonId) {
+    return new Promise(resolve => {
+        const cur = getLiveTimes();
+        const modal = document.createElement('div');
+        modal.className = 'timestamp-modal';
+        modal.innerHTML = '<div class="timestamp-modal-content"><h3>Class start time</h3>' +
+            '<div class="form-group"><label for="lt-input">Start time (your local time)</label>' +
+            '<input type="time" id="lt-input" value="' + (cur[lessonId] || cur._default || '') + '"></div>' +
+            '<label class="file-picker-select-all"><input type="checkbox" id="lt-default"> Use this time for all live classes</label>' +
+            '<div class="timestamp-modal-buttons"><button class="btn btn-primary" id="lt-save">Save</button>' +
+            '<button class="btn btn-secondary" id="lt-cancel">Cancel</button></div></div>';
+        document.body.appendChild(modal);
+        const close = v => { modal.remove(); resolve(v); };
+        modal.querySelector('#lt-save').onclick = () => {
+            const v = modal.querySelector('#lt-input').value;
+            if (!v) { toast('Pick a time first'); return; }
+            saveLiveTime(lessonId, v, modal.querySelector('#lt-default').checked); close(true);
+        };
+        modal.querySelector('#lt-cancel').onclick = () => close(false);
+        modal.addEventListener('click', e => { if (e.target === modal) close(false); });
+    });
+}
+
+// Reminders fire only while a tab of this app is open (no push server).
+const _remTimers = {};
+function getReminders() { return readJSON(REMIND_KEY, {}); }
+function scheduleReminders() {
+    Object.values(_remTimers).forEach(clearTimeout);
+    const all = getReminders(), now = Date.now(); let dirty = false;
+    Object.entries(all).forEach(([id, r]) => {
+        if (r.start < now) { delete all[id]; dirty = true; return; }
+        const delay = Math.max(0, r.start - LIVE_SOON_MIN * 60000 - now);
+        if (delay > 2147483000) return;
+        _remTimers[id] = setTimeout(() => {
+            fireReminder(id, r);
+            const a = getReminders(); delete a[id]; writeJSON(REMIND_KEY, a);
+        }, delay);
+    });
+    if (dirty) writeJSON(REMIND_KEY, all);
+}
+function fireReminder(id, r) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        const n = new Notification('Live class starting soon', { body: r.title + '\nStarts at ' + fmtClock(new Date(r.start)) });
+        n.onclick = () => { window.focus(); location.href = '/lesson/' + id + '?live=1'; };
+    }
+    toast('Live class starting soon: ' + r.title, 12000);
+}
+// Returns true when a reminder is now set, false when removed / not possible
+async function toggleReminder(lesson) {
+    const all = getReminders();
+    if (all[lesson._id]) { delete all[lesson._id]; writeJSON(REMIND_KEY, all); scheduleReminders(); toast('Reminder removed'); return false; }
+    const info = liveInfo(lesson);
+    if (!info.start || info.state === 'live' || info.state === 'ended') { toast('Set the class start time first'); return false; }
+    if ('Notification' in window && Notification.permission === 'default') {
+        try { await Notification.requestPermission(); } catch (e) { /* ignore */ }
+    }
+    all[lesson._id] = { start: info.start.getTime(), title: lesson.title || 'Live class' };
+    writeJSON(REMIND_KEY, all); scheduleReminders();
+    toast(('Notification' in window && Notification.permission === 'granted')
+        ? 'Reminder set - we will notify you 10 minutes before (keep a tab open)'
+        : 'Reminder set - notifications are blocked, so you will see an in-app alert');
+    return true;
+}
+document.addEventListener('DOMContentLoaded', scheduleReminders);
+
 // Export functions for use in other scripts
 window.AplusPlayer = {
     logout,
@@ -318,6 +535,9 @@ window.AplusPlayer = {
     setLessonWatched,
     getHideWatched,
     setHideWatched,
+    getHideOldLive,
+    setHideOldLive,
+    isOldLiveLesson,
     getHiddenGroups,
     isGroupHidden,
     setGroupHidden,
@@ -329,5 +549,14 @@ window.AplusPlayer = {
     setFileRead,
     getVideoPosition,
     setVideoPosition,
-    clearVideoPosition
+    clearVideoPosition,
+    esc,
+    toast,
+    liveInfo,
+    liveLabel,
+    liveChipHTML,
+    startLiveTicker,
+    askLiveTime,
+    getReminders,
+    toggleReminder
 };

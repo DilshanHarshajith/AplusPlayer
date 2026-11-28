@@ -58,6 +58,26 @@
         </div>
     </div>
 
+    <div id="live-container" class="live-panel hidden">
+        <span class="live-badge"><span class="live-dot"></span>LIVE CLASS</span>
+        <h2>Join on Zoom</h2>
+        <div id="live-status-big" class="live-countdown"></div>
+        <div class="live-tools">
+            <button type="button" id="live-time-btn" class="btn btn-secondary btn-sm">Set start time</button>
+            <button type="button" id="live-remind-btn" class="btn btn-secondary btn-sm">Remind me</button>
+        </div>
+        <p class="subtitle">Live classes run on Zoom. Generate your personal join link below.</p>
+        <button type="button" id="live-get-btn" class="btn btn-primary btn-large">Get Zoom link</button>
+        <div id="live-result" class="hidden">
+            <a id="live-join-btn" class="btn btn-primary btn-large" target="_blank" rel="noopener noreferrer">Attend now</a>
+            <div class="live-url">
+                <input type="text" id="live-url-input" readonly>
+                <button type="button" id="live-copy-btn" class="btn btn-secondary btn-sm">Copy</button>
+            </div>
+        </div>
+        <details id="live-debug" class="hidden"><summary>Technical details (send this to get it fixed)</summary><pre id="live-debug-pre"></pre></details>
+    </div>
+
     <div id="file-container" class="file-container hidden">
         <!-- Attachment tabs (visible only when the card has > 1 file) -->
         <div id="file-tabs" class="file-tabs hidden"></div>
@@ -84,7 +104,7 @@ let playbackUrl = null;
 let availableQualities = [];
 let currentQuality = 'auto';
 let timestamps = [];
-let lessonContentType = 'video'; // 'video' or 'file' (PDF/document)
+let lessonContentType = 'video'; // 'video', 'live_stream', 'file', or 'live' (Zoom)
 let activeFileIndex = 0;       // index into the file-list for multi-file cards
 let lessonFiles = [];           // [{index, title, filename}, ...] from /files
 
@@ -128,7 +148,21 @@ async function loadLessonDetails() {
 
             loadingDiv.classList.add('hidden');
 
-            if (lessonContentType === 'file') {
+            // LIVE_STREAM lessons are a real HLS stream and go to the player.
+            // Only Zoom classes need the join panel. The "?live=1" flag comes
+            // from the course menu; backend content type, lesson_type and
+            // title are fallbacks for bookmarks and shared links.
+            const lessonType = String((data.lesson && data.lesson.lesson_type) || '').toUpperCase();
+            const isStream = lessonContentType === 'live_stream' ||
+                             lessonType.includes('LIVE_STREAM') || lessonType.includes('LIVESTREAM');
+            const isZoom = !isStream && (
+                new URLSearchParams(location.search).get('live') === '1' ||
+                lessonContentType === 'live' ||
+                lessonType === 'LIVE' || lessonType.includes('ZOOM') ||
+                /\blive\b/i.test((data.lesson && data.lesson.title) || ''));
+            if (isZoom) {
+                initLivePanel();
+            } else if (lessonContentType === 'file') {
                 document.getElementById('file-container').classList.remove('hidden');
                 initFileViewer();
             } else {
@@ -148,6 +182,68 @@ async function loadLessonDetails() {
         errorDiv.textContent = 'Network error. Please try again.';
         errorDiv.classList.remove('hidden');
     }
+}
+
+// Live class: ask the backend for the Zoom join link (same as the official "Get Link").
+function initLivePanel() {
+    const box = document.getElementById('live-container');
+    const getBtn = document.getElementById('live-get-btn');
+    const result = document.getElementById('live-result');
+    const input = document.getElementById('live-url-input');
+    const join = document.getElementById('live-join-btn');
+    const dbg = document.getElementById('live-debug');
+    const errorDiv = document.getElementById('lesson-error');
+    box.classList.remove('hidden');
+
+    // Countdown / status + reminder controls
+    const big = document.getElementById('live-status-big');
+    const timeBtn = document.getElementById('live-time-btn');
+    const remindBtn = document.getElementById('live-remind-btn');
+    const liveLesson = () => ({ _id: lessonId, title: (document.getElementById('lesson-title').textContent || '').trim() });
+    function paintLive() {
+        const l = liveLesson(), info = AplusPlayer.liveInfo(l);
+        big.className = 'live-countdown ' + info.state;
+        big.textContent = info.state === 'unknown' ? '' : AplusPlayer.liveLabel(info);
+        big.classList.toggle('hidden', info.state === 'unknown');
+        timeBtn.classList.toggle('hidden', info.state === 'unknown' || !!info.start && /\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*[ap]\.?m\b/i.test(l.title));
+        const canRemind = !!info.start && !['live', 'ended'].includes(info.state);
+        remindBtn.classList.toggle('hidden', !canRemind && !AplusPlayer.getReminders()[lessonId]);
+        remindBtn.textContent = AplusPlayer.getReminders()[lessonId] ? 'Reminder on' : 'Remind me';
+    }
+    timeBtn.addEventListener('click', async () => { if (await AplusPlayer.askLiveTime(lessonId)) paintLive(); });
+    remindBtn.addEventListener('click', async () => { await AplusPlayer.toggleReminder(liveLesson()); paintLive(); });
+    paintLive(); setInterval(paintLive, 1000);
+
+    getBtn.addEventListener('click', async () => {
+        getBtn.disabled = true; getBtn.textContent = 'Getting link...';
+        errorDiv.classList.add('hidden'); dbg.classList.add('hidden');
+        try {
+            const r = await fetch(`/api/lesson/${lessonId}/live-link`, { method: 'POST' });
+            if (r.status === 404) {
+                throw new Error('The live-link endpoint is not available on this server. Please try again later.');
+            }
+            const d = await r.json().catch(() => ({ error: 'Unexpected server response (HTTP ' + r.status + ').' }));
+            if (r.ok && d.url && /^https:\/\//i.test(d.url)) {
+                input.value = d.url; join.href = d.url;
+                result.classList.remove('hidden'); getBtn.classList.add('hidden');
+                return;
+            }
+            errorDiv.textContent = d.error || 'Could not get the live link.';
+            errorDiv.classList.remove('hidden');
+            if (d.debug) {
+                document.getElementById('live-debug-pre').textContent = JSON.stringify(d.debug, null, 2);
+                dbg.classList.remove('hidden');
+            }
+        } catch (e) {
+            errorDiv.textContent = (e && e.message && !/Failed to fetch/i.test(e.message)) ? e.message : 'Network error. Please try again.';
+            errorDiv.classList.remove('hidden');
+        }
+        getBtn.disabled = false; getBtn.textContent = 'Try again';
+    });
+    document.getElementById('live-copy-btn').addEventListener('click', async (e) => {
+        try { await navigator.clipboard.writeText(input.value); } catch (_) { input.select(); document.execCommand('copy'); }
+        e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500);
+    });
 }
 
 // Wire up the file viewer (PDFs, images, etc.) for non-video lessons.

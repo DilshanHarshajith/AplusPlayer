@@ -53,7 +53,7 @@ def playback():
 
     try:
         r = _upstream.get(
-            sess.base_url + "/playback",
+            sess.base_url + sess.playlist_path,
             headers={"Authorization": f"Bearer {sess.video_access_token}"},
             timeout=90)
     except requests.RequestException as exc:

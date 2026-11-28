@@ -18,7 +18,13 @@
     <div id="course-error" class="error-message hidden"></div>
     
     <div id="lessons-container" class="lessons-container hidden">
-        <div class="filters-container">
+        <div class="lesson-tabs" id="lesson-tabs" role="tablist">
+            <button type="button" class="lesson-tab active" data-tab="recordings" role="tab" aria-selected="true"
+                    onclick="setActiveTab('recordings')">Recordings</button>
+            <button type="button" class="lesson-tab" data-tab="live" role="tab" aria-selected="false"
+                    onclick="setActiveTab('live')">Live <span id="live-tab-count" class="tab-count">0</span></button>
+        </div>
+        <div class="filters-container" id="filters-container">
             <div class="filter-side filter-side-right">
                 <div class="filter-row filter-row-dates">
                     <label class="filter-toggle" title="Remove lessons marked as watched from the list">
@@ -34,6 +40,16 @@
                 </div>
                 <div class="filter-row" id="group-filters">
                     <!-- Group chips injected by JS -->
+                </div>
+            </div>
+        </div>
+        <div class="filters-container hidden" id="live-filters">
+            <div class="filter-side filter-side-right">
+                <div class="filter-row filter-row-dates">
+                    <label class="filter-toggle" title="Hide live classes whose date has already passed">
+                        <input type="checkbox" id="hide-old-live-checkbox" onchange="toggleHideOldLive(this.checked)">
+                        Hide old live classes
+                    </label>
                 </div>
             </div>
         </div>
@@ -54,8 +70,12 @@ let allLessons = [];
 let activeYear = 'All';
 let activeMonth = 'All';
 let activeGroup = 'All';
+// Which top-level tab is showing: recorded lessons or live classes.
+let activeTab = 'recordings';
 // Whether lessons marked as watched should be left out of the menu.
 let hideWatched = false;
+// Whether past live classes should be left out of the Live tab.
+let hideOldLive = false;
 // Category (group) names hidden via right-click on their chip, for this course.
 let hiddenGroups = {};
 
@@ -86,6 +106,71 @@ function escapeHTML(val) {
         .replace(/'/g, '&#39;');
 }
 
+// Live classes are vendor "ZOOM" lessons, or lessons whose group/title says
+// "live" (same signals the backend uses to keep them in the menu).
+function lessonById(id) {
+    return allLessons.find(l => l._id === id);
+}
+
+function isLiveLesson(l) {
+    const label = /\b(live|zoom)\b/i;
+    const type = String(l.lesson_type || '').trim().toUpperCase();
+    return label.test(l._safeGroup || l.group_name || '') ||
+           label.test(l.title || '') ||
+           type.includes('LIVE') || type.includes('ZOOM');
+}
+
+// Vendor LIVE_STREAM cards are playable HLS streams, not Zoom meetings.
+function isLiveStreamLesson(l) {
+    const type = String(l.lesson_type || '').trim().toUpperCase();
+    return type.includes('LIVE_STREAM') || type.includes('LIVESTREAM');
+}
+
+// ---- Recordings / Live tabs ----
+function recordingLessons() {
+    return allLessons.filter(l => !isLiveLesson(l));
+}
+
+function liveTabCount() {
+    return allLessons.filter(l => isLiveLesson(l)
+        && !(hideWatched && AplusPlayer.isLessonWatched(l._id))
+        && !(hideOldLive && AplusPlayer.isOldLiveLesson(l))).length;
+}
+
+function updateLiveTabCount() {
+    const badge = document.getElementById('live-tab-count');
+    if (badge) badge.textContent = liveTabCount();
+}
+
+window.setActiveTab = function(tab) {
+    activeTab = tab === 'live' ? 'live' : 'recordings';
+    document.querySelectorAll('.lesson-tab').forEach(btn => {
+        const on = btn.dataset.tab === activeTab;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    // Each tab has its own filter row: recordings get the date/group filters,
+    // the Live tab gets the "hide old classes" toggle.
+    const filters = document.getElementById('filters-container');
+    if (filters) filters.classList.toggle('hidden', activeTab === 'live');
+    const liveFilters = document.getElementById('live-filters');
+    if (liveFilters) liveFilters.classList.toggle('hidden', activeTab !== 'live');
+    renderFilteredLessons();
+};
+
+async function setLiveTime(id) {
+    if (await AplusPlayer.askLiveTime(id)) renderFilteredLessons();
+}
+
+async function remindMe(id) {
+    await AplusPlayer.toggleReminder(lessonById(id));
+    renderFilteredLessons();
+}
+
+function afterLessonsLoaded() {
+    AplusPlayer.startLiveTicker();
+}
+
 function isGroupHidden(group) {
     return !!hiddenGroups[group];
 }
@@ -93,8 +178,11 @@ function isGroupHidden(group) {
 function initFilters(lessons) {
     hiddenGroups = AplusPlayer.getHiddenGroups(courseId);
     hideWatched = AplusPlayer.getHideWatched();
+    hideOldLive = AplusPlayer.getHideOldLive();
     const hideWatchedCheckbox = document.getElementById('hide-watched-checkbox');
     if (hideWatchedCheckbox) hideWatchedCheckbox.checked = hideWatched;
+    const hideOldLiveCheckbox = document.getElementById('hide-old-live-checkbox');
+    if (hideOldLiveCheckbox) hideOldLiveCheckbox.checked = hideOldLive;
     setupGroupFilterEvents();
 
     allLessons = lessons.map(l => {
@@ -115,7 +203,9 @@ function initFilters(lessons) {
     });
 
     renderFilters();
+    updateLiveTabCount();
     renderFilteredLessons();
+    afterLessonsLoaded();
 }
 
 // Delegated so the handlers survive renderFilters() rebuilding the chips.
@@ -141,7 +231,9 @@ function setupGroupFilterEvents() {
 }
 
 function renderFilters() {
-    const years = new Set(allLessons.map(l => l._safeYear));
+    // Live classes have their own tab, so filters only cover recordings.
+    const filterLessons = recordingLessons();
+    const years = new Set(filterLessons.map(l => l._safeYear));
     const sortedYears = Array.from(years).sort((a, b) => {
         if (a === 'Unknown') return 1;
         if (b === 'Unknown') return -1;
@@ -151,14 +243,14 @@ function renderFilters() {
     // Months available under the currently selected year (so the dropdown can
     // show every month but disable ones with no lessons in that year).
     const availableMonthsForYear = new Set(
-        allLessons.filter(l => activeYear === 'All' || l._safeYear === activeYear)
+        filterLessons.filter(l => activeYear === 'All' || l._safeYear === activeYear)
                  .map(l => l._safeMonth)
     );
 
     // Groups are narrowed by both year and month so the user only sees
     // groups that actually have lessons matching the current scope.
     const groups = new Set(
-        allLessons.filter(l => {
+        filterLessons.filter(l => {
             const matchYear = activeYear === 'All' || l._safeYear === activeYear;
             const matchMonth = activeMonth === 'All'
                 || (activeMonth === 'Unknown' ? l._safeMonth === 'Unknown'
@@ -221,7 +313,7 @@ window.setMonth = function(m) {
     // If the currently active group has no lessons in the new month, fall
     // back to 'All' so the lessons list isn't empty for an invisible chip.
     if (activeGroup !== 'All') {
-        const groupStillExists = allLessons.some(l => {
+        const groupStillExists = recordingLessons().some(l => {
             const matchYear = activeYear === 'All' || l._safeYear === activeYear;
             const matchMonth = activeMonth === 'All'
                 || (activeMonth === 'Unknown' ? l._safeMonth === 'Unknown'
@@ -253,6 +345,7 @@ window.toggleGroupHidden = function(group) {
     if (hide && activeGroup === group) activeGroup = 'All';
 
     renderFilters();
+    updateLiveTabCount();
     renderFilteredLessons();
 };
 
@@ -261,6 +354,16 @@ window.toggleGroupHidden = function(group) {
 window.toggleHideWatched = function(checked) {
     hideWatched = !!checked;
     AplusPlayer.setHideWatched(hideWatched);
+    updateLiveTabCount();
+    renderFilteredLessons();
+};
+
+// Remembered choice: skip live classes whose date is in the past. Classes
+// without a date in the title are kept (they could be happening right now).
+window.toggleHideOldLive = function(checked) {
+    hideOldLive = !!checked;
+    AplusPlayer.setHideOldLive(hideOldLive);
+    updateLiveTabCount();
     renderFilteredLessons();
 };
 
@@ -268,11 +371,17 @@ function renderFilteredLessons() {
     const list = document.getElementById('lessons-list');
     
     let filtered = allLessons.filter(l => {
+        if (hideWatched && AplusPlayer.isLessonWatched(l._id)) return false;
+
+        // Live classes live exclusively in the Live tab.
+        if (activeTab === 'live') {
+            return isLiveLesson(l) && !(hideOldLive && AplusPlayer.isOldLiveLesson(l));
+        }
+        if (isLiveLesson(l)) return false;
+
         // Hidden categories are excluded entirely — no card, not even a
         // placeholder. Their chips remain visible (blurred) in the filters.
         if (isGroupHidden(l._safeGroup)) return false;
-
-        if (hideWatched && AplusPlayer.isLessonWatched(l._id)) return false;
 
         let matchYear = (activeYear === 'All' || l._safeYear === activeYear);
         
@@ -291,15 +400,22 @@ function renderFilteredLessons() {
     });
 
     if (filtered.length === 0) {
-        const allHidden = allLessons.length > 0 && allLessons.every(l => isGroupHidden(l._safeGroup));
-        const allWatched = hideWatched && allLessons.length > 0 && allLessons.every(l =>
+        if (activeTab === 'live') {
+            list.innerHTML = hideOldLive
+                ? '<p style="color: var(--text-muted);">No live classes for today or later. Uncheck "Hide old live classes" to see the full list.</p>'
+                : '<p style="color: var(--text-muted);">No live classes in this course. Turn off "Hide watched" if you expected some.</p>';
+            return;
+        }
+        const recordings = recordingLessons();
+        const allHidden = recordings.length > 0 && recordings.every(l => isGroupHidden(l._safeGroup));
+        const allWatched = hideWatched && recordings.length > 0 && recordings.every(l =>
             isGroupHidden(l._safeGroup) || AplusPlayer.isLessonWatched(l._id));
         if (allHidden) {
             list.innerHTML = '<p style="color: var(--text-muted);">All categories are hidden. Right-click a category chip to show it again.</p>';
         } else if (allWatched) {
-            list.innerHTML = '<p style="color: var(--text-muted);">All lessons are marked as watched. Uncheck "Hide watched" to show them again.</p>';
+            list.innerHTML = '<p style="color: var(--text-muted);">All recordings are marked as watched. Uncheck "Hide watched" to show them again.</p>';
         } else {
-            list.innerHTML = '<p style="color: var(--text-muted);">No lessons match the selected filters.</p>';
+            list.innerHTML = '<p style="color: var(--text-muted);">No recordings match the selected filters.</p>';
         }
         return;
     }
@@ -342,7 +458,15 @@ function renderFilteredLessons() {
                 .includes(String(lesson.lesson_type || '').toLowerCase());
             const noWatchTime = Number(lesson.video_can_view || 0) <= 0;
             const isFile = knownFileType || noWatchTime;
-            const actionLabel = isFile ? 'View' : 'Watch';
+            const isLive = isLiveLesson(lesson);
+            const isZoomCard = isLive && !isLiveStreamLesson(lesson);
+            const liveState = isZoomCard ? AplusPlayer.liveInfo(lesson) : null;
+            let actionLabel = isFile ? 'View' : 'Watch';
+            if (isZoomCard) actionLabel = (liveState.state === 'live' || liveState.state === 'soon') ? 'Join' : 'Open';
+            const reminded = isZoomCard && !!AplusPlayer.getReminders()[lesson._id];
+            const liveBits = isZoomCard ? `${AplusPlayer.liveChipHTML(lesson)}
+                ${liveState.needsTime ? `<button type="button" class="chip-btn" onclick="setLiveTime('${lesson._id}')">Set time</button>` : ''}
+                ${liveState.start && !['live', 'ended'].includes(liveState.state) ? `<button type="button" class="chip-btn ${reminded ? 'on' : ''}" onclick="remindMe('${lesson._id}')">${reminded ? 'Reminder on' : 'Remind me'}</button>` : ''}` : '';
             // Always call the self-correcting downloader; it probes the
             // file endpoint if the HLS path fails (vendor's lesson_type
             // string for files isn't a fixed set, so first-pass
@@ -354,7 +478,8 @@ function renderFilteredLessons() {
                         <h4>${lesson.title || 'Untitled Lesson'}</h4>
                         <div class="lesson-meta">
                             ${lesson.is_free ? '<span class="badge badge-free">Free</span>' : ''}
-                            ${isFile ? '<span class="badge badge-file">File</span>' : ''}
+                            ${isFile && !isLive ? '<span class="badge badge-file">File</span>' : ''}
+                            ${liveBits}
                         </div>
                     </div>
                     <div class="lesson-card-bottom">
@@ -364,8 +489,8 @@ function renderFilteredLessons() {
                                    onchange="toggleWatched('${lesson._id}', this.checked)">
                         </label>
                         <div class="lesson-actions">
-                            <a href="/lesson/${lesson._id}?course=${encodeURIComponent(courseId)}" class="btn btn-primary btn-sm">${actionLabel}</a>
-                            <button onclick="${dlOnclick}" class="btn btn-secondary btn-sm download-btn">Download</button>
+                            <a href="/lesson/${lesson._id}?course=${encodeURIComponent(courseId)}${isZoomCard ? '&live=1' : ''}" class="btn btn-primary btn-sm">${actionLabel}</a>
+                            ${isLive ? '' : `<button onclick="${dlOnclick}" class="btn btn-secondary btn-sm download-btn">Download</button>`}
                         </div>
                     </div>
                     <div class="lesson-progress hidden" id="progress-${lesson._id}">
@@ -438,6 +563,7 @@ function toggleWatched(lessonId, checked) {
         // The card must disappear when watched and come back when unwatched
         // (from the player page), so rebuild the list instead of just
         // toggling a CSS class.
+        updateLiveTabCount();
         renderFilteredLessons();
         return;
     }

@@ -55,7 +55,8 @@ webapp/                 everything HTTP-facing — pages, JSON API, streaming
 ├── __init__.py           Flask application factory; registers all blueprints
 ├── auth.py                login page + login/logout + auth-status API
 ├── courses.py              home redirect, course listing, course details
-├── lessons.py               lesson page, lesson details, playback prepare
+├── lessons.py               lesson page, lesson details, playback prepare,
+│                            and Zoom live-link discovery endpoints
 ├── downloads.py              streams a download, using player/download_engine.py
 ├── proxy.py                   HLS proxy routes, using player/streaming.py
 ├── store.py                    shared SQLite KV store (user-scoped, worker-safe)
@@ -139,6 +140,22 @@ After logging in you're taken straight to your courses page, where you can:
   remembered per course in the browser's `localStorage`.
 - Tick "Hide watched" in the course filters to leave out lessons you've marked
   as watched. The choice is remembered in the browser's `localStorage`.
+- **Live / Zoom classes** live in their own **Live** tab; the **Recordings**
+  tab contains only recorded lessons. Zoom classes carry status chips (LIVE
+  NOW, starting soon, today / upcoming) and open a countdown with a
+  **Get Zoom link** button, which asks the vendor for your personal join URL
+  (the same "Get Link" flow the official site uses). Vendor `LIVE_STREAM`
+  lessons instead play their unencrypted HLS stream directly in the player.
+  **Hide old live classes** on the Live tab removes classes whose title date
+  has passed (or, for undated titles, whose course month is before this month).
+  Classes with no date at all stay visible. It's remembered in `localStorage`.
+  If the start time isn't in the lesson title, **Set start time**
+  lets you enter it locally —
+  optionally as the default for all live classes. **Remind me** schedules a
+  browser notification 10 minutes before class; a tab of the app must stay
+  open because there is no push server. Times, reminders, and the "reminder
+  on" state live in the browser's `localStorage`. Live classes aren't
+  downloadable, so their Download button is hidden.
 
 ## Running as a multi-user web service
 
@@ -235,6 +252,11 @@ the public network. The app binds `0.0.0.0:5000` by default (`GUNICORN_BIND`).
   through the authenticated `/api/proxy/*` routes.
 - Sessions are stored server-side via Flask's session mechanism; set
   `FLASK_SECRET_KEY` in your environment for anything beyond local/dev use.
+- Zoom join links are fetched on demand through the authenticated
+  `/api/lesson/<id>/live-link` route; the app neither caches nor shares them.
+  The two `/api/_diag/live...` endpoints exist only for debugging live-link
+  discovery — they are login-protected but should be removed or restricted on
+  a public deployment.
 
 ## Legal Disclaimer & Terms of Use
 

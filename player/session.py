@@ -36,11 +36,11 @@ class PlaybackSessionData:
 
     __slots__ = ("lesson_id", "base_url", "video_access_token",
                  "playback_hash", "video_aes_key", "segments_encrypted",
-                 "stream_url")
+                 "stream_url", "playlist_path")
 
     def __init__(self, lesson_id="", base_url="", video_access_token="",
                  playback_hash="", video_aes_key=b"", segments_encrypted=True,
-                 stream_url=""):
+                 stream_url="", playlist_path="/playback"):
         self.lesson_id = lesson_id
         self.base_url = base_url
         self.video_access_token = video_access_token
@@ -48,6 +48,7 @@ class PlaybackSessionData:
         self.video_aes_key = video_aes_key
         self.segments_encrypted = segments_encrypted
         self.stream_url = stream_url
+        self.playlist_path = playlist_path
 
     @classmethod
     def from_session(cls, sess):
@@ -60,6 +61,7 @@ class PlaybackSessionData:
             video_aes_key=sess.video_aes_key,
             segments_encrypted=sess.segments_encrypted,
             stream_url=sess.stream_url,
+            playlist_path=sess.playlist_path,
         )
 
     def to_dict(self) -> dict:
@@ -72,6 +74,7 @@ class PlaybackSessionData:
             "video_aes_key": self.video_aes_key.hex() if self.video_aes_key else None,
             "segments_encrypted": self.segments_encrypted,
             "stream_url": self.stream_url,
+            "playlist_path": self.playlist_path,
         }
 
     @classmethod
@@ -86,6 +89,7 @@ class PlaybackSessionData:
             video_aes_key=bytes.fromhex(key) if key else b"",
             segments_encrypted=d.get("segments_encrypted", True),
             stream_url=d.get("stream_url", ""),
+            playlist_path=d.get("playlist_path") or "/playback",
         )
 
     def fetch_upstream(self, path: str) -> bytes:
@@ -124,7 +128,7 @@ class PlaybackSessionData:
 
         Each variant is returned as a dict with 'id' and 'label' keys.
         """
-        master_text = self._fetch_and_decrypt_playlist("/playback")
+        master_text = self._fetch_and_decrypt_playlist(self.playlist_path)
         lines = master_text.splitlines()
 
         qualities = []
@@ -174,7 +178,7 @@ class PlaybackSessionData:
             quality: The quality variant to use. If "auto", uses the first (highest) variant.
                     Otherwise should be a variant path like "v0/playback".
         """
-        master_text = self._fetch_and_decrypt_playlist("/playback")
+        master_text = self._fetch_and_decrypt_playlist(self.playlist_path)
         variants = [l.strip() for l in master_text.splitlines()
                     if l.strip() and not l.startswith("#")]
         if not variants:
@@ -220,6 +224,7 @@ class PlaybackSession:
         self.segments_encrypted = True
         self.playback_hash = ""
         self.stream_url = ""
+        self.playlist_path = "/playback"
 
     def prepare(self):
         """Resolve lesson metadata and verify the video encryption key."""
@@ -233,10 +238,21 @@ class PlaybackSession:
         if not meta:
             raise RuntimeError("failed to decrypt lesson content")
 
-        pbk = decrypt_playback_key(meta["playback_key"], meta["playback_sec"])
         self.playback_hash = meta["playback_hash"]
         self.video_access_token = meta.get("pass", "")
         self.stream_url = meta.get("stream_url") or ""
+
+        # LIVE_STREAM lessons carry a direct, unencrypted HLS URL and no
+        # playback key. Serve it through the proxy instead of trying to
+        # decrypt a key that the vendor never issued.
+        if self.stream_url and not meta.get("playback_key"):
+            self.base_url = self.stream_url.rsplit("/", 1)[0]
+            self.playlist_path = "/" + self.stream_url.rsplit("/", 1)[1]
+            self.segments_encrypted = False
+            self.video_aes_key = b""
+            return
+
+        pbk = decrypt_playback_key(meta["playback_key"], meta["playback_sec"])
         self.base_url = meta["playback"].split("/playback")[0]
 
         # Stage 3 (VERIFIED against live CDN data): video AES-128 key =
@@ -295,7 +311,7 @@ class PlaybackSession:
         just the first segment, but returns the full ordered list — used
         by the download module to pull an entire lesson.
         """
-        master_text = self._fetch_and_decrypt_playlist("/playback")
+        master_text = self._fetch_and_decrypt_playlist(self.playlist_path)
         variants = [l.strip() for l in master_text.splitlines()
                     if l.strip() and not l.startswith("#")]
         if not variants:

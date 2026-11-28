@@ -1032,6 +1032,11 @@ body {
     align-items: flex-start;
 }
 
+/* .filters-container sets display:flex later than .hidden, so be explicit. */
+.filters-container.hidden {
+    display: none;
+}
+
 .filter-side {
     display: flex;
     flex-direction: column;
@@ -1451,4 +1456,252 @@ body {
     accent-color: var(--accent);
     width: 15px;
     height: 15px;
+}
+
+/* Live / Zoom classes: Recordings/Live tabs, chips and the join panel */
+.lesson-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.lesson-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1.1rem;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.lesson-tab:hover {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.lesson-tab.active {
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.tab-count {
+    min-width: 1.4rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    background: var(--accent-bg);
+    color: var(--accent-soft);
+    font-size: 0.75rem;
+    text-align: center;
+}
+
+.live-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: livePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+.live-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: var(--accent-bg);
+    color: var(--accent-soft);
+    font-size: 0.72rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.03em;
+}
+
+.live-chip .live-dot {
+    width: 7px;
+    height: 7px;
+    background: currentColor;
+}
+
+.live-chip.live,
+.live-chip.unknown {
+    background: var(--accent);
+    color: var(--on-accent);
+}
+
+.live-chip.soon,
+.live-chip.today {
+    background: var(--accent-soft);
+    color: #000;
+}
+
+.live-chip.ended {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+}
+
+.live-chip.ended .live-dot,
+.live-chip.future .live-dot,
+.live-chip.upcoming .live-dot {
+    animation: none;
+    opacity: 0.6;
+}
+
+.chip-btn {
+    padding: 0.15rem 0.6rem;
+    border: 1px dashed rgba(255, 255, 255, 0.3);
+    border-radius: 999px;
+    background: none;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.chip-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.chip-btn.on {
+    color: var(--accent);
+    border-style: solid;
+    border-color: var(--accent);
+}
+
+/* Countdown / join panel on the lesson page */
+.live-panel {
+    max-width: 620px;
+    margin: 2rem auto;
+    padding: 2rem;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+}
+
+.live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.9rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+}
+
+.live-badge .live-dot {
+    background: var(--on-accent);
+}
+
+.live-countdown {
+    margin: 0.5rem 0 1rem;
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.live-countdown.live,
+.live-countdown.soon,
+.live-countdown.today {
+    color: var(--accent);
+}
+
+.live-countdown.ended {
+    color: var(--text-muted);
+}
+
+.live-tools,
+.live-url {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: center;
+}
+
+.live-tools { margin-bottom: 1.25rem; }
+.live-url { margin-top: 1rem; }
+.live-url input { flex: 1; min-width: 0; }
+#live-result { display: flex; flex-direction: column; align-items: center; }
+
+#live-debug {
+    margin-top: 1.25rem;
+    text-align: left;
+}
+
+#live-debug summary {
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+#live-debug pre {
+    max-height: 320px;
+    overflow: auto;
+    margin-top: 0.6rem;
+    padding: 0.8rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Non-blocking toast used by reminders and the live-time picker */
+#toast-box {
+    position: fixed;
+    top: 5.2rem;
+    right: 1.2rem;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    max-width: min(380px, calc(100vw - 2rem));
+}
+
+.toast {
+    padding: 0.8rem 1.1rem;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    color: var(--text);
+    font-size: 0.88rem;
+    animation: fadeIn 0.25s ease;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.toast.out {
+    opacity: 0;
+    transform: translateX(20px);
+}
+
+@media (max-width: 768px) {
+    #toast-box {
+        top: auto;
+        right: 0.8rem;
+        bottom: 5rem;
+        left: 0.8rem;
+        max-width: none;
+    }
 }

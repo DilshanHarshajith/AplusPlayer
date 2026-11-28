@@ -58,6 +58,41 @@ def google_drive_links(url: str) -> dict | None:
     }
 
 
+# Vendor signals for a Zoom/live class. The course listing doesn't mark these
+# with a dedicated boolean: the group and/or title says "live", and some
+# lessons carry lesson_type "ZOOM".
+_LIVE_LABEL_RE = re.compile(r"\blive\b|\bzoom\b", re.I)
+
+
+def is_live_lesson(lesson: dict | None) -> bool:
+    """True when a lesson card represents a Zoom/live class.
+
+    Used to keep live classes in the course menu even when their month isn't
+    in ``sub_months``: they are meetings rather than paid video content, so
+    hiding them behind the purchase-lock check makes the schedule invisible.
+    """
+    lesson = lesson or {}
+    lesson_type = str(lesson.get("lesson_type") or "").strip().upper()
+    # The vendor uses LIVE_STREAM as well as ZOOM/LIVE; substring matching
+    # covers both without treating ordinary videos as live classes.
+    if "LIVE" in lesson_type or "ZOOM" in lesson_type:
+        return True
+    return bool(
+        _LIVE_LABEL_RE.search(str(lesson.get("group_name") or ""))
+        or _LIVE_LABEL_RE.search(str(lesson.get("title") or ""))
+    )
+
+
+def is_live_stream_lesson(lesson: dict | None) -> bool:
+    """True for vendor LIVE_STREAM cards, which carry a direct HLS URL.
+
+    Unlike Zoom classes these lessons have a playable (unencrypted) stream and
+    no playback key, so they must go through the HLS player, not the join panel.
+    """
+    lesson_type = str((lesson or {}).get("lesson_type") or "").strip().upper()
+    return "LIVE_STREAM" in lesson_type or "LIVESTREAM" in lesson_type
+
+
 def is_video_lesson(lesson_type) -> bool:
     """Classify a lesson_type string as video (True) or file/document (False).
 
