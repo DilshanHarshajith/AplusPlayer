@@ -341,6 +341,41 @@ function parseLiveDate(title) {
 }
 
 const HIDE_OLD_LIVE_KEY = 'aplus_hide_old_live';
+const TITLE_HIDE_KEY = 'aplus_hide_title_contains';
+const TITLE_PARTS_KEY = 'aplus_hidden_title_parts';
+
+// Map of lowercased title fragment -> true when it is hiding lessons.
+function getTitleParts() {
+    let parts;
+    try { parts = JSON.parse(localStorage.getItem(TITLE_PARTS_KEY) || '{}'); }
+    catch (error) { parts = {}; }
+    if (!parts || typeof parts !== 'object' || Array.isArray(parts)) parts = {};
+    // Migrate the old single-text setting into the first chip.
+    if (!Object.keys(parts).length) {
+        const legacy = String(localStorage.getItem(TITLE_HIDE_KEY) || '').trim();
+        if (legacy) {
+            parts[legacy.toLocaleLowerCase()] = true;
+            localStorage.setItem(TITLE_PARTS_KEY, JSON.stringify(parts));
+            localStorage.removeItem(TITLE_HIDE_KEY);
+        }
+    }
+    return parts;
+}
+
+function setTitleParts(parts) {
+    try { localStorage.setItem(TITLE_PARTS_KEY, JSON.stringify(parts || {})); }
+    catch (error) { /* storage blocked/full: chips still work for this tab */ }
+}
+
+function getTitleHideText() {
+    try { return String(localStorage.getItem(TITLE_HIDE_KEY) || ''); }
+    catch (error) { return ''; }
+}
+
+function setTitleHideText(text) {
+    try { localStorage.setItem(TITLE_HIDE_KEY, String(text || '')); }
+    catch (error) { /* storage blocked/full: filter still works for this tab */ }
+}
 
 function getHideOldLive() {
     try {
@@ -538,6 +573,10 @@ window.AplusPlayer = {
     getHideOldLive,
     setHideOldLive,
     isOldLiveLesson,
+    getTitleHideText,
+    setTitleHideText,
+    getTitleParts,
+    setTitleParts,
     getHiddenGroups,
     isGroupHidden,
     setGroupHidden,

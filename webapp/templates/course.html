@@ -31,6 +31,10 @@
                         <input type="checkbox" id="hide-watched-checkbox" onchange="toggleHideWatched(this.checked)">
                         Hide watched
                     </label>
+                    <input type="search" id="title-hide-input" class="filter-text" autocomplete="off"
+                           placeholder="Add title text..." title="Type text and press Enter to add a filter chip"
+                           onchange="addTitleHideText(this.value)"
+                           onkeydown="if (event.key === 'Enter') { addTitleHideText(this.value); this.value = ''; }">
                     <select id="year-select" class="filter-select" onchange="setYear(this.value)">
                         <!-- Year options injected by JS -->
                     </select>
@@ -50,6 +54,17 @@
                         <input type="checkbox" id="hide-old-live-checkbox" onchange="toggleHideOldLive(this.checked)">
                         Hide old live classes
                     </label>
+                    <input type="search" id="live-title-hide-input" class="filter-text" autocomplete="off"
+                           placeholder="Add title text..." title="Type text and press Enter to add a filter chip"
+                           onchange="addTitleHideText(this.value)"
+                           onkeydown="if (event.key === 'Enter') { addTitleHideText(this.value); this.value = ''; }">
+                </div>
+            </div>
+        </div>
+        <div class="filters-container hidden" id="title-filters">
+            <div class="filter-side filter-side-right">
+                <div class="filter-row" id="title-filter-chips">
+                    <!-- Title-text chips injected by JS -->
                 </div>
             </div>
         </div>
@@ -76,6 +91,8 @@ let activeTab = 'recordings';
 let hideWatched = false;
 // Whether past live classes should be left out of the Live tab.
 let hideOldLive = false;
+// Title fragments: { text: true (hiding) | false (just saved, not hiding) }.
+let hiddenTitleParts = {};
 // Category (group) names hidden via right-click on their chip, for this course.
 let hiddenGroups = {};
 
@@ -131,8 +148,19 @@ function recordingLessons() {
     return allLessons.filter(l => !isLiveLesson(l));
 }
 
+function titleIsHidden(l) {
+    const title = String(l.title || '').toLocaleLowerCase();
+    return Object.entries(hiddenTitleParts)
+        .some(([text, enabled]) => enabled && title.includes(text));
+}
+
+function anyTitleFilterOn() {
+    return Object.values(hiddenTitleParts).some(Boolean);
+}
+
 function liveTabCount() {
     return allLessons.filter(l => isLiveLesson(l)
+        && !titleIsHidden(l)
         && !(hideWatched && AplusPlayer.isLessonWatched(l._id))
         && !(hideOldLive && AplusPlayer.isOldLiveLesson(l))).length;
 }
@@ -183,7 +211,13 @@ function initFilters(lessons) {
     if (hideWatchedCheckbox) hideWatchedCheckbox.checked = hideWatched;
     const hideOldLiveCheckbox = document.getElementById('hide-old-live-checkbox');
     if (hideOldLiveCheckbox) hideOldLiveCheckbox.checked = hideOldLive;
+    hiddenTitleParts = AplusPlayer.getTitleParts();
+    ['title-hide-input', 'live-title-hide-input'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
     setupGroupFilterEvents();
+    setupTitleFilterEvents();
 
     allLessons = lessons.map(l => {
         // Normalize fields heavily to avoid any edge cases
@@ -228,6 +262,47 @@ function setupGroupFilterEvents() {
         event.preventDefault(); // suppress the browser's context menu
         toggleGroupHidden(chip.dataset.group);
     });
+}
+
+// Title chips live in their own always-visible row so they can be managed
+// from either tab. Right-click pauses/resumes a chip; the small x removes it.
+function setupTitleFilterEvents() {
+    const container = document.getElementById('title-filter-chips');
+    if (!container || container.dataset.bound) return;
+    container.dataset.bound = 'true';
+
+    container.addEventListener('click', event => {
+        const remove = event.target.closest && event.target.closest('.chip-remove');
+        if (remove) removeTitleHideText(remove.dataset.text);
+    });
+
+    container.addEventListener('contextmenu', event => {
+        if (event.target.closest && event.target.closest('.chip-remove')) return;
+        const chip = event.target.closest && event.target.closest('.title-chip');
+        if (!chip) return;
+        event.preventDefault(); // suppress the browser's context menu
+        toggleTitleHideText(chip.dataset.text);
+    });
+}
+
+function renderTitleChips() {
+    const container = document.getElementById('title-filter-chips');
+    const row = document.getElementById('title-filters');
+    if (!container || !row) return;
+    const texts = Object.keys(hiddenTitleParts);
+    row.classList.toggle('hidden', texts.length === 0);
+    container.innerHTML = texts.map(text => {
+        const safe = escapeHTML(text);
+        const enabled = !!hiddenTitleParts[text];
+        const hint = enabled ? 'Right-click to unhide lessons with this text'
+                             : 'Right-click to hide lessons with this text';
+        return '<span class="title-chip" data-text="' + safe + '">' +
+               '<button type="button" class="filter-chip title-chip-main ' + (enabled ? 'hidden-category' : '') +
+               '" title="' + hint + '">' + safe + '</button>' +
+               '<button type="button" class="chip-remove" data-text="' + safe +
+               '" title="Remove this text filter" aria-label="Remove ' + safe +
+               '">&times; Remove</button></span>';
+    }).join('');
 }
 
 function renderFilters() {
@@ -298,6 +373,8 @@ function renderFilters() {
         });
         groupContainer.innerHTML = groupHTML;
     }
+
+    renderTitleChips();
 }
 
 window.setYear = function(y) {
@@ -367,10 +444,43 @@ window.toggleHideOldLive = function(checked) {
     renderFilteredLessons();
 };
 
+// Entering text only adds a chip. Nothing is hidden until that chip is
+// right-clicked, just like the group cards.
+window.addTitleHideText = function(value) {
+    const text = String(value || '').trim().toLocaleLowerCase();
+    if (!text) return;
+    hiddenTitleParts[text] = !!hiddenTitleParts[text]; // keep state if re-added
+    AplusPlayer.setTitleParts(hiddenTitleParts);
+    ['title-hide-input', 'live-title-hide-input'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    renderTitleChips();
+    updateLiveTabCount();
+    renderFilteredLessons();
+};
+
+window.toggleTitleHideText = function(text) {
+    hiddenTitleParts[text] = !hiddenTitleParts[text];
+    AplusPlayer.setTitleParts(hiddenTitleParts);
+    renderTitleChips();
+    updateLiveTabCount();
+    renderFilteredLessons();
+};
+
+window.removeTitleHideText = function(text) {
+    delete hiddenTitleParts[text];
+    AplusPlayer.setTitleParts(hiddenTitleParts);
+    renderTitleChips();
+    updateLiveTabCount();
+    renderFilteredLessons();
+};
+
 function renderFilteredLessons() {
     const list = document.getElementById('lessons-list');
     
     let filtered = allLessons.filter(l => {
+        if (titleIsHidden(l)) return false;
         if (hideWatched && AplusPlayer.isLessonWatched(l._id)) return false;
 
         // Live classes live exclusively in the Live tab.
@@ -400,6 +510,10 @@ function renderFilteredLessons() {
     });
 
     if (filtered.length === 0) {
+        if (anyTitleFilterOn()) {
+            list.innerHTML = '<p style="color: var(--text-muted);">No lessons to show. Right-click a title chip to unhide it, or use its × button to remove it.</p>';
+            return;
+        }
         if (activeTab === 'live') {
             list.innerHTML = hideOldLive
                 ? '<p style="color: var(--text-muted);">No live classes for today or later. Uncheck "Hide old live classes" to see the full list.</p>'

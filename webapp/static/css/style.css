@@ -1070,6 +1070,25 @@ body {
     border-color: var(--accent);
 }
 
+.filter-text {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--text);
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    min-width: 220px;
+}
+
+.filter-text::placeholder {
+    color: var(--text-muted);
+}
+
+.filter-text:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
 .filter-select:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -1157,6 +1176,42 @@ body {
 .filter-chip .has-content-icon {
     color: var(--accent-soft);
     font-size: 0.8rem;
+}
+
+/* Saved title-text filters: the chip itself behaves like a group chip
+   (right-click to pause/resume); the small trailing button removes it. */
+.title-chip {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 0;
+}
+
+.title-chip-main {
+    border-radius: 8px 0 0 8px !important;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chip-remove {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-left: 0;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-secondary);
+    padding: 0 0.6rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.chip-remove:hover {
+    background: rgba(255, 80, 80, 0.2);
+    border-color: rgba(255, 80, 80, 0.5);
+    color: #fff;
 }
 
 /* Responsive Design */

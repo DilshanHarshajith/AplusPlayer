@@ -140,6 +140,11 @@ After logging in you're taken straight to your courses page, where you can:
   remembered per course in the browser's `localStorage`.
 - Tick "Hide watched" in the course filters to leave out lessons you've marked
   as watched. The choice is remembered in the browser's `localStorage`.
+- Type text into **Add title text...** (for example `විභාග ගැටලු`) and press
+  Enter: each phrase becomes a chip, and you can add as many as you like.
+  Adding a chip does not hide anything by itself — right-click it to hide or
+  unhide matching lessons in both tabs (blurred = hiding). Use the chip's
+  **× Remove** button to delete a phrase. Chips are remembered in `localStorage`.
 - **Live / Zoom classes** live in their own **Live** tab; the **Recordings**
   tab contains only recorded lessons. Zoom classes carry status chips (LIVE
   NOW, starting soon, today / upcoming) and open a countdown with a
